@@ -1,6 +1,4 @@
-# Alerts and Approval Workflow (Sprint 4)
-
-Sprint 4 adds:
+# Alerts and Approval Workflow
 
 - alerting adapters (console/file/webhook)
 - rule-based alert triggers

@@ -1,4 +1,4 @@
-# Execution Engine (Sprint 2)
+# Execution Engine
 
 Execution realism is now applied in historical testing through `core/execution/execution_engine.py`.
 

@@ -237,7 +237,7 @@ def scan_and_buy(wallet, regime):
         _alert("drawdown_circuit_breaker", f"Drawdown breaker active at {dd_pct:.1%}", {"drawdown_pct": dd_pct})
         return
 
-    # Additional portfolio-level risk checks (Sprint 1 Risk Engine v2)
+    # Additional portfolio-level risk checks
     risk_ok, risk_reason = _RISK_ENGINE.can_open_new_positions(wallet)
     if not risk_ok:
         print(f"  {risk_reason}. No new buys.")

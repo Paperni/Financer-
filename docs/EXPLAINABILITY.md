@@ -1,4 +1,4 @@
-# Explainability and Decision Audit (Sprint 3)
+# Explainability and Decision Audit
 
 Decision events are now logged in structured form for audit and debugging.
 

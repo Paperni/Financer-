@@ -1,4 +1,4 @@
-# Control Center API (Sprint 3)
+# Control Center API
 
 Local API to control runtime behavior without editing code.
 

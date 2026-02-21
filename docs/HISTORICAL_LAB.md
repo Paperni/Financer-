@@ -1,4 +1,4 @@
-# Historical Lab (Sprint 2)
+# Historical Lab
 
 The historical tester now supports advanced experiment modes:
 
