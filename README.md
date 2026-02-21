@@ -2,9 +2,9 @@
 
 Financer is a Python trading and analysis repository with three operational surfaces:
 
-- fundamental equity analysis and report generation
-- live strategy loop with risk controls and operator controls
-- historical replay lab for fast strategy validation
+- **fundamental equity analysis and report generation**
+- **live strategy loop** with risk controls and operator controls
+- **historical replay lab** for fast strategy validation
 
 ## Start Here
 
@@ -13,6 +13,8 @@ Read in this order:
 1. `docs/START_HERE.md`
 2. `docs/ARCHITECTURE.md`
 3. `docs/FEATURES_AND_FUNCTIONS.md`
+4. `docs/API_CONTROL_CENTER.md`
+5. `docs/OPERATIONS_RUNBOOK.md`
 
 ## Setup
 
@@ -21,6 +23,20 @@ Use Python 3.12+ in a virtual environment, then install core dependencies:
 ```bash
 python -m pip install yfinance pandas numpy plotly beautifulsoup4 lxml peewee textblob pyyaml
 ```
+
+## Documentation Entry Points
+
+- `docs/START_HERE.md` - setup and first execution steps
+- `docs/FEATURES_AND_FUNCTIONS.md` - complete functional breakdown
+- `docs/ARCHITECTURE.md` - component and flow diagrams
+- `docs/CONFIG_SCHEMA.md` - runtime config keys and override behavior
+- `docs/RISK_ENGINE_V2.md` - portfolio-level risk gate behavior
+- `docs/EXECUTION_ENGINE.md` - execution model and fill simulation behavior
+- `docs/HISTORICAL_LAB.md` - replay/sweep/walk-forward/compare behavior
+- `docs/API_CONTROL_CENTER.md` - control API endpoints
+- `docs/EXPLAINABILITY.md` - decision log structure and usage
+- `docs/ALERTS_AND_APPROVALS.md` - alerts and manual approval workflow
+- `docs/OPERATIONS_RUNBOOK.md` - practical runtime operating guide
 
 ## Common Commands
 
@@ -39,6 +55,24 @@ python live_trader.py --loop --profile balanced
 python -m historical_tester
 ```
 
+## Typical Workflows
+
+- **Fundamental analysis workflow**
+  - run `downloader.py` to collect company filings
+  - run `analyzer.py` to generate valuation/report output
+  - review reports in `reports/`
+
+- **Live bot workflow**
+  - check current state with `--status`
+  - run loop with a profile (`--profile balanced`)
+  - apply targeted overrides with `--set key=value`
+  - optionally run Control API to operate runtime safely
+
+- **Historical validation workflow**
+  - run `python -m historical_tester`
+  - choose mode (`single`, `sweep`, `walk`, `compare`)
+  - inspect output artifacts in `test_results/`
+
 ## Functional Areas
 
 - `analyzer.py`, `downloader.py`, `technical.py`: filing ingestion + valuation report pipeline
@@ -48,6 +82,17 @@ python -m historical_tester
 - `core/`: reusable services (`strategy`, `risk`, `execution`, `explainability`, `alerts`)
 - `configs/`: default strategy config and risk profiles
 - `docs/`: operational and architecture documentation
+
+## Key Runtime Artifacts
+
+The following files/folders are expected to be produced/updated during operation:
+
+- `wallet.json` and `equity_curve.json` - portfolio state and equity history
+- `dashboard.html` - live dashboard output
+- `reports/` - generated analysis reports and downloaded SEC artifacts
+- `test_results/` - historical tester reports and run outputs
+- `logs/decisions/*.jsonl` - structured decision/audit events
+- `logs/alerts/alerts.jsonl` - alert output log
 
 ## Operator Controls
 
@@ -63,3 +108,21 @@ python live_trader.py --control-api
   - `logs/decisions/*.jsonl`
 - Alert logs:
   - `logs/alerts/alerts.jsonl`
+
+## Visual Map
+
+```mermaid
+flowchart TD
+    repoRoot[Financer-]
+    repoRoot --> coreScripts[Core Scripts]
+    repoRoot --> corePkg[core/]
+    repoRoot --> controlCenter[control_center/]
+    repoRoot --> historicalTester[historical_tester/]
+    repoRoot --> configsDir[configs/]
+    repoRoot --> docsDir[docs/]
+    repoRoot --> reportsDir[reports/]
+    coreScripts --> liveTrader[live_trader.py]
+    coreScripts --> analyzer[analyzer.py]
+    controlCenter --> controlApi[api.py]
+    historicalTester --> tester[tester.py]
+```
