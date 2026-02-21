@@ -30,6 +30,9 @@ python analyzer.py
 
 # View reports
 start reports\AAPL_analysis.html   # Windows
+
+# Historical accelerated replay tester (live-like simulation)
+python -m historical_tester.tester
 ```
 
 ## Architecture
@@ -43,7 +46,7 @@ Two-stage pipeline: download then analyze.
 2. **analyzer.py** (~1500+ lines) — The main analysis engine. Orchestrates everything:
    - Fetches live market data from yfinance (info, financials, balance_sheet, cashflow, growth_estimates, history)
    - Parses SEC 10-K filings for raw metrics and NLP text analysis
-   - Runs 6-phase investment analysis framework (see analyzer.md for spec)
+   - Runs 6-phase investment analysis framework (see `docs/analyzer.md` for spec)
    - Performs multi-method valuation with composite blending
    - Compares against sector peers
    - Generates self-contained HTML reports with embedded Plotly charts
@@ -55,7 +58,8 @@ Two-stage pipeline: download then analyze.
 - **qualitative.py** — `QualitativeIntelligence` class (NLP moat/sentiment). Logic inlined into analyzer.py.
 - **metrics.py** — `QuantitativeCore` class (ROIC, FCF, DCF). Logic inlined into analyzer.py.
 - **data_engine.py** — `DataEngine` wrapper class. Not used; analyzer.py handles data fetching directly.
-- **debug_nlp.py** — TextBlob test script.
+- **tools/debug_nlp.py** — TextBlob test script.
+- **historical_tester/** — accelerated historical replay environment for the live trading bot (time simulator, historical cache, metrics, reports).
 
 ### Analysis Pipeline (analyzer.py)
 
