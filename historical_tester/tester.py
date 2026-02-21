@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import portfolio as pf
 from data_static import BROAD_STOCKS, BROAD_ETFS
 from indicators import check_buy_signal_detailed, check_volume_contraction
+from core.strategy.config_loader import load_runtime_config
+from core.execution.execution_engine import ExecutionEngine
 
 # Handle both module and script execution
 try:
@@ -24,23 +26,28 @@ try:
     from .historical_cache import HistoricalDataCache
     from .metrics import MetricsCollector
     from .report_generator import ReportGenerator
+    from .run_registry import RunRegistry
 except ImportError:
     # Running as script
     from time_simulator import TimeSimulator
     from historical_cache import HistoricalDataCache
     from metrics import MetricsCollector
     from report_generator import ReportGenerator
+    from run_registry import RunRegistry
 
 
 class HistoricalTester:
     """Historical trading tester that replays live trading logic on historical data."""
     
-    def __init__(self, start_date: datetime, end_date: datetime, 
-                 initial_capital: float = 100000.0,
+    def __init__(self, start_date: datetime, end_date: datetime,
+                 initial_capital: float | None = None,
                  wallet_path: str = "test_wallet.json",
-                 speed_multiplier: float = 10.0,
-                 enable_news: bool = False,
-                 enable_earnings: bool = False):
+                 speed_multiplier: float | None = None,
+                 enable_news: bool | None = None,
+                 enable_earnings: bool | None = None,
+                 config_path: str | None = None,
+                 profile: str | None = None,
+                 overrides: list[str] | None = None):
         """
         Initialize historical tester.
         
@@ -50,26 +57,40 @@ class HistoricalTester:
             initial_capital: Initial capital for testing
             wallet_path: Path to test wallet file
             speed_multiplier: Speed multiplier for simulation
-            enable_news: Enable news sentiment (default: False)
-            enable_earnings: Enable earnings calendar (default: False)
+            enable_news: Enable news sentiment (None = use config)
+            enable_earnings: Enable earnings calendar (None = use config)
         """
+        self.runtime_cfg = load_runtime_config(
+            config_path=config_path,
+            profile=profile,
+            overrides=overrides or [],
+        )
+        self.config_path = config_path
+        self.profile = profile
+
         self.start_date = start_date
         self.end_date = end_date
-        self.initial_capital = initial_capital
+        cfg_capital = float(self.runtime_cfg.get("capital", {}).get("initial_capital", 100000.0))
+        self.initial_capital = initial_capital if initial_capital is not None else cfg_capital
         self.wallet_path = wallet_path
-        self.speed_multiplier = speed_multiplier
-        self.enable_news = enable_news
-        self.enable_earnings = enable_earnings
+        self.speed_multiplier = speed_multiplier if speed_multiplier is not None else 10.0
+        cfg_features = self.runtime_cfg.get("features", {})
+        self.enable_news = enable_news if enable_news is not None else bool(cfg_features.get("news_enabled", False))
+        self.enable_earnings = (
+            enable_earnings if enable_earnings is not None else bool(cfg_features.get("earnings_enabled", False))
+        )
         
         # Initialize components
         self.time_sim = TimeSimulator(start_date, speed_multiplier)
         self.data_cache = HistoricalDataCache(
-            start_date, 
-            enable_news=enable_news,
-            enable_earnings=enable_earnings
+            start_date,
+            enable_news=self.enable_news,
+            enable_earnings=self.enable_earnings
         )
-        self.metrics = MetricsCollector(initial_capital)
+        self.metrics = MetricsCollector(self.initial_capital)
         self.report_gen = ReportGenerator()
+        self.run_registry = RunRegistry()
+        self.execution_engine = ExecutionEngine(self.runtime_cfg.get("execution", {}))
         
         # Override wallet file path
         pf.WALLET_FILE = wallet_path
@@ -90,6 +111,15 @@ class HistoricalTester:
         print(f"  Earnings: {'Enabled' if self.enable_earnings else 'Disabled'}")
         print(f"{'='*60}\n")
         
+        run_meta = {
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
+            "profile": self.profile,
+            "config_path": self.config_path,
+            "runtime_cfg": self.runtime_cfg,
+        }
+        run_id, run_dir = self.run_registry.create_run(run_meta)
+
         # Step 1: Download historical data
         print("  [1/4] Downloading historical data...")
         self.data_cache.download_historical_data(
@@ -117,10 +147,25 @@ class HistoricalTester:
             "speed_multiplier": self.speed_multiplier,
             "enable_news": self.enable_news,
             "enable_earnings": self.enable_earnings,
+            "profile": self.profile,
         }
         
         final_metrics = self.metrics.calculate_metrics(wallet)
+        final_metrics["run_id"] = run_id
         report_paths = self.report_gen.generate_all_reports(final_metrics, test_config)
+        self.run_registry.save_summary(run_dir, final_metrics)
+        self.run_registry.append_leaderboard(
+            {
+                "run_id": run_id,
+                "start_date": test_config["start_date"],
+                "end_date": test_config["end_date"],
+                "profile": test_config["profile"],
+                "total_return_pct": final_metrics.get("total_return_pct", 0),
+                "win_rate_pct": final_metrics.get("win_rate_pct", 0),
+                "max_drawdown_pct": final_metrics.get("max_drawdown_pct", 0),
+                "total_trades": final_metrics.get("total_trades", 0),
+            }
+        )
         
         print(f"\n{'='*60}")
         print(f"  SIMULATION COMPLETE")
@@ -134,6 +179,7 @@ class HistoricalTester:
         print(f"    JSON: {report_paths['json']}")
         print(f"    CSV:  {report_paths['csv_dir']}")
         print(f"{'='*60}\n")
+        return final_metrics
     
     def _run_simulation(self, wallet: dict):
         """Run the main simulation loop."""
@@ -458,6 +504,13 @@ class HistoricalTester:
                 continue
             
             close = float(row["Close"])
+            can_open, open_reason = self.execution_engine.can_open_position(self.time_sim.current_time)
+            if not can_open:
+                continue
+            fill = self.execution_engine.resolve_entry(row, close)
+            if not fill.get("filled"):
+                continue
+            close = float(fill["price"])
             reason_str = " | ".join(reasons.values())
             
             signals = {
@@ -472,6 +525,7 @@ class HistoricalTester:
                 "news_adjustment": news["adjustment"],
                 "days_to_earnings": days_to_earn if self.enable_earnings else None,
                 "reasoning": f"[{score}/8 | {regime}] {reason_str}",
+                "execution_mode": self.execution_engine.cfg.order_mode,
             }
             
             if pf.execute_buy(wallet, ticker, close, atr=atr, regime=regime, signals=signals):
@@ -515,10 +569,20 @@ class HistoricalTester:
 
 
 def interactive_cli():
+    config_path = input("Config path [default: configs/strategy/default.yaml]: ").strip()
+    if not config_path:
+        config_path = "configs/strategy/default.yaml"
+
+    profile = input("Profile (conservative|balanced|aggressive) [default: balanced]: ").strip()
+    if not profile:
+        profile = "balanced"
+
     """Interactive CLI for configuring and running historical test."""
     print("\n" + "="*60)
     print("  HISTORICAL TRADING TESTER")
     print("="*60 + "\n")
+
+    mode = input("Mode (single/sweep/walk/compare) [default: single]: ").strip().lower() or "single"
     
     # Get start date
     while True:
@@ -570,7 +634,7 @@ def interactive_cli():
     while True:
         capital_str = input("Initial capital [default: 100000]: ").strip()
         if not capital_str:
-            initial_capital = 100000.0
+            initial_capital = None
             break
         try:
             initial_capital = float(capital_str)
@@ -578,13 +642,13 @@ def interactive_cli():
         except ValueError:
             print("  Invalid amount. Please enter a number.")
     
-    # Get news sentiment
-    news_str = input("Enable news sentiment? (y/n) [default: n]: ").strip().lower()
-    enable_news = news_str == "y"
-    
-    # Get earnings calendar
-    earnings_str = input("Enable earnings calendar? (y/n) [default: n]: ").strip().lower()
-    enable_earnings = earnings_str == "y"
+    # Get news sentiment (blank = config default)
+    news_str = input("Enable news sentiment? (y/n, blank=profile default): ").strip().lower()
+    enable_news = None if not news_str else (news_str == "y")
+
+    # Get earnings calendar (blank = config default)
+    earnings_str = input("Enable earnings calendar? (y/n, blank=profile default): ").strip().lower()
+    enable_earnings = None if not earnings_str else (earnings_str == "y")
     
     print("\n" + "="*60)
     print("  Starting simulation...")
@@ -599,9 +663,73 @@ def interactive_cli():
         speed_multiplier=speed_multiplier,
         enable_news=enable_news,
         enable_earnings=enable_earnings,
+        config_path=config_path,
+        profile=profile,
     )
-    
-    tester.run()
+    if mode == "single":
+        tester.run()
+    elif mode == "sweep":
+        try:
+            from .optimizer import run_parameter_sweep
+        except ImportError:
+            from optimizer import run_parameter_sweep
+        sweep_sets = [
+            ["risk.max_positions_per_sector=2"],
+            ["risk.max_positions_per_sector=3"],
+            ["risk.max_positions_per_sector=4"],
+        ]
+        base_kwargs = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "wallet_path": wallet_path,
+            "speed_multiplier": speed_multiplier,
+            "enable_news": enable_news,
+            "enable_earnings": enable_earnings,
+            "config_path": config_path,
+            "profile": profile,
+        }
+        results = run_parameter_sweep(base_kwargs, sweep_sets)
+        print(f"Sweep completed: {len(results)} runs")
+    elif mode == "walk":
+        try:
+            from .optimizer import run_walk_forward
+        except ImportError:
+            from optimizer import run_walk_forward
+        base_kwargs = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "wallet_path": wallet_path,
+            "speed_multiplier": speed_multiplier,
+            "enable_news": enable_news,
+            "enable_earnings": enable_earnings,
+            "config_path": config_path,
+            "profile": profile,
+        }
+        results = run_walk_forward(base_kwargs, window_days=30, step_days=15)
+        print(f"Walk-forward completed: {len(results)} windows")
+    elif mode == "compare":
+        try:
+            from .optimizer import run_ab_compare
+        except ImportError:
+            from optimizer import run_ab_compare
+        prof_b = input("Compare against profile [default: aggressive]: ").strip() or "aggressive"
+        base_kwargs = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "wallet_path": wallet_path,
+            "speed_multiplier": speed_multiplier,
+            "enable_news": enable_news,
+            "enable_earnings": enable_earnings,
+            "config_path": config_path,
+        }
+        res = run_ab_compare(base_kwargs, profile, prof_b)
+        print(f"Compare complete. Delta return: {res['delta_return_pct']:+.2f}%")
+    else:
+        print("Unknown mode; running single.")
+        tester.run()
 
 
 if __name__ == "__main__":

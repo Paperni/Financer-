@@ -1,0 +1,20 @@
+capital:
+  initial_capital: 100000.0
+
+risk:
+  max_positions_per_sector: 3
+  daily_loss_halt_pct: 0.03
+  max_open_risk_pct_of_equity: 0.10
+  max_new_position_risk_pct_of_equity: 0.025
+  max_position_notional_pct: 0.10
+
+features:
+  news_enabled: true
+  earnings_enabled: true
+
+execution:
+  order_mode: market
+  no_trade_first_minutes: 0
+  no_trade_last_minutes: 0
+  limit_offset_pct: 0.0
+  stop_offset_pct: 0.001

@@ -20,6 +20,19 @@ or:
 python -m historical_tester
 ```
 
+Interactive flow now supports:
+
+- config path (default `configs/strategy/default.yaml`)
+- profile selection (`conservative`, `balanced`, `aggressive`)
+- optional overrides through code-level constructor args
+
+Modes:
+
+- `single` (default)
+- `sweep` (parameter sweep presets)
+- `walk` (walk-forward windows)
+- `compare` (A/B profile run)
+
 ## What It Does
 
 - replays market hours through historical windows

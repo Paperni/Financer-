@@ -5,6 +5,14 @@ import portfolio as pf
 from indicators import (
     DataCache, check_buy_signal_detailed, check_volume_contraction,
 )
+from core.strategy.config_loader import load_runtime_config
+from core.risk.risk_engine_v2 import RiskEngineV2
+from control_center.state_store import ControlStateStore
+from control_center.api import run_control_center
+from control_center.approvals import ApprovalQueue
+from core.explainability.decision_logger import DecisionLogger
+from core.alerts.notifier import AlertNotifier
+from core.alerts.rules import should_alert
 
 try:
     import winsound
@@ -13,12 +21,46 @@ except ImportError:
     HAS_WINSOUND = False
 
 # ── Configuration ─────────────────────────────────────────────────────────────
+_RUNTIME_CFG = {}
 INITIAL_CAPITAL = 100000.0
 MAX_PER_SECTOR = 3          # max positions in the same sector
+_RISK_ENGINE = RiskEngineV2({})
+_CONTROL_STORE = ControlStateStore()
+_DECISION_LOGGER = DecisionLogger()
+_APPROVAL_QUEUE = ApprovalQueue()
+_ALERT_NOTIFIER = AlertNotifier({"enabled": True, "channels": ["console", "file"]})
+
+
+def apply_runtime_config(config_path=None, profile=None, overrides=None):
+    """Load runtime config and apply key controls to globals."""
+    global _RUNTIME_CFG, INITIAL_CAPITAL, MAX_PER_SECTOR, _RISK_ENGINE
+    _RUNTIME_CFG = load_runtime_config(
+        config_path=config_path,
+        profile=profile,
+        overrides=overrides or [],
+    )
+    INITIAL_CAPITAL = float(_RUNTIME_CFG.get("capital", {}).get("initial_capital", 100000.0))
+    MAX_PER_SECTOR = int(_RUNTIME_CFG.get("risk", {}).get("max_positions_per_sector", 3))
+    _RISK_ENGINE = RiskEngineV2(_RUNTIME_CFG.get("risk", {}))
+
+
+def _feature_enabled(name, default=True):
+    return bool(_RUNTIME_CFG.get("features", {}).get(name, default))
+
+
+def _control_state():
+    return _CONTROL_STORE.load()
+
+
+def _alert(event, message, context=None):
+    ctx = context or {}
+    if should_alert(event, ctx):
+        _ALERT_NOTIFIER.send("WARN", message, {"event": event, **ctx})
 
 # ── Shared data cache (persists between cycles) ─────────────────────────────
 _cache = DataCache()
 ALL_TICKERS = list(dict.fromkeys(BROAD_STOCKS + BROAD_ETFS))
+apply_runtime_config()
 
 
 # ── Sound alerts ─────────────────────────────────────────────────────────────
@@ -52,6 +94,11 @@ def trade_alert(action, ticker, pnl=0):
 # ── Strategy Execution ────────────────────────────────────────────────────────
 def update_holdings(wallet):
     """Check stops, TPs, time stops using REAL-TIME 1-min prices."""
+    controls = _control_state()
+    if controls.get("pause_sells"):
+        print("  ControlCenter: pause_sells=true. Exit checks paused.")
+        _DECISION_LOGGER.log(event="exits_skipped", reason="pause_sells")
+        return
     # Filter out baseline from exit checks (but still update its price)
     holdings = wallet["holdings"]
     if not holdings:
@@ -92,21 +139,23 @@ def update_holdings(wallet):
             price = pos.get("last_price", pos["entry_price"])
 
             # Pre-earnings safety: reduce to half size if earnings within 2 days
-            days_to_earn = _cache.days_until_earnings(ticker)
-            if days_to_earn is not None and days_to_earn <= 2 and not pos.get("earnings_reduced"):
-                half_qty = pos["qty"] // 2
-                if half_qty > 0:
-                    pnl = pf.execute_sell(wallet, ticker, price, half_qty,
-                                          f"Pre-earnings reduce ({days_to_earn}d)")
-                    print(f"  >> PRE-EARNINGS: Reduced {ticker} by {half_qty} sh (earnings in {days_to_earn}d) | PnL: ${pnl:.2f}")
-                    if ticker in wallet["holdings"]:
-                        wallet["holdings"][ticker]["earnings_reduced"] = True
-                    trade_alert("SELL", ticker, pnl)
-                    continue  # Skip normal exit check this cycle
-            elif days_to_earn is None or days_to_earn > 5:
-                # Earnings passed or unknown — reset flag so future earnings get the reduction
-                if pos.get("earnings_reduced"):
-                    pos["earnings_reduced"] = False
+            days_to_earn = None
+            if _feature_enabled("earnings_enabled", True):
+                days_to_earn = _cache.days_until_earnings(ticker)
+                if days_to_earn is not None and days_to_earn <= 2 and not pos.get("earnings_reduced"):
+                    half_qty = pos["qty"] // 2
+                    if half_qty > 0:
+                        pnl = pf.execute_sell(wallet, ticker, price, half_qty,
+                                              f"Pre-earnings reduce ({days_to_earn}d)")
+                        print(f"  >> PRE-EARNINGS: Reduced {ticker} by {half_qty} sh (earnings in {days_to_earn}d) | PnL: ${pnl:.2f}")
+                        if ticker in wallet["holdings"]:
+                            wallet["holdings"][ticker]["earnings_reduced"] = True
+                        trade_alert("SELL", ticker, pnl)
+                        continue  # Skip normal exit check this cycle
+                elif days_to_earn is None or days_to_earn > 5:
+                    # Earnings passed or unknown — reset flag so future earnings get the reduction
+                    if pos.get("earnings_reduced"):
+                        pos["earnings_reduced"] = False
 
             result = pf.check_exits(wallet, ticker, price)
             if result:
@@ -177,17 +226,29 @@ def scan_and_buy(wallet, regime):
     swing_count = pf.count_swing_positions(wallet)
     if swing_count >= pf.MAX_POSITIONS:
         print(f"  Max swing positions ({pf.MAX_POSITIONS}) reached. Skipping scan.")
+        _DECISION_LOGGER.log(event="scan_skipped", reason="max_positions_reached")
         return
 
     # Drawdown circuit breaker
     halted, dd_pct = pf.check_drawdown_halt(wallet)
     if halted:
         print(f"  CIRCUIT BREAKER: Portfolio down {dd_pct:.1%} (limit {pf.DRAWDOWN_HALT_PCT:.0%}). No new buys.")
+        _DECISION_LOGGER.log(event="scan_skipped", reason="drawdown_circuit_breaker", context={"drawdown_pct": dd_pct})
+        _alert("drawdown_circuit_breaker", f"Drawdown breaker active at {dd_pct:.1%}", {"drawdown_pct": dd_pct})
+        return
+
+    # Additional portfolio-level risk checks (Sprint 1 Risk Engine v2)
+    risk_ok, risk_reason = _RISK_ENGINE.can_open_new_positions(wallet)
+    if not risk_ok:
+        print(f"  {risk_reason}. No new buys.")
+        _DECISION_LOGGER.log(event="scan_skipped", reason=risk_reason)
+        _alert("risk_halt", risk_reason, {})
         return
 
     # RISK_OFF gate: no new buys when market is in downtrend
     if regime == "RISK_OFF":
         print("  RISK OFF: SPY below SMA-200. No new buys.")
+        _DECISION_LOGGER.log(event="scan_skipped", reason="risk_off_regime")
         return
 
     # Phase 1: Technical screen (8-point, fast — no API calls per ticker)
@@ -240,31 +301,56 @@ def scan_and_buy(wallet, regime):
         if found >= slots:
             break
 
-        # Sector concentration check
         candidate_sector = fundies.get("sector", "Unknown") if fundies else "Unknown"
-        if candidate_sector != "Unknown" and sector_count.get(candidate_sector, 0) >= MAX_PER_SECTOR:
-            print(f"  Skip {ticker}: sector '{candidate_sector}' already has {MAX_PER_SECTOR} positions")
+        close = float(row["Close"])
+        entry_ok, entry_reason = _RISK_ENGINE.can_take_entry(
+            wallet=wallet,
+            candidate_sector=candidate_sector,
+            sector_count=sector_count,
+            price=close,
+            atr=atr,
+        )
+        if not entry_ok:
+            print(f"  Skip {ticker}: {entry_reason}")
+            _DECISION_LOGGER.log(event="candidate_skipped", ticker=ticker, reason=entry_reason)
             continue
 
         # Earnings calendar gate — avoid binary event risk
-        days_to_earn = _cache.days_until_earnings(ticker)
-        if days_to_earn is not None and days_to_earn <= 3:
-            print(f"  Skip {ticker}: earnings in {days_to_earn} days (binary risk)")
-            continue
+        days_to_earn = None
+        if _feature_enabled("earnings_enabled", True):
+            days_to_earn = _cache.days_until_earnings(ticker)
+            if days_to_earn is not None and days_to_earn <= 3:
+                print(f"  Skip {ticker}: earnings in {days_to_earn} days (binary risk)")
+                _DECISION_LOGGER.log(
+                    event="candidate_skipped",
+                    ticker=ticker,
+                    reason="earnings_gate",
+                    context={"days_to_earnings": days_to_earn},
+                )
+                continue
 
         # News sentiment gate — FinBERT analysis
-        news = _cache.get_news_sentiment(ticker)
+        if _feature_enabled("news_enabled", True):
+            news = _cache.get_news_sentiment(ticker)
+        else:
+            news = {"sentiment": "NEUTRAL", "adjustment": 0}
         if news["sentiment"] == "DANGER":
             print(f"  BLOCKED {ticker}: {news['sentiment']} -- {news.get('top_headline', 'N/A')[:60]}")
+            _DECISION_LOGGER.log(event="candidate_blocked", ticker=ticker, reason="danger_news")
             continue
         score += news["adjustment"]
         if news["adjustment"] != 0:
             reasons["news"] = f"News: {news['sentiment']} ({news['adjustment']:+.1f})"
         if score < 5:
             print(f"  Skip {ticker}: score dropped to {score:.1f}/8 after news penalty")
+            _DECISION_LOGGER.log(
+                event="candidate_skipped",
+                ticker=ticker,
+                reason="score_below_threshold_after_news",
+                context={"score": score},
+            )
             continue
 
-        close = float(row["Close"])
         reason_str = " | ".join(reasons.values())
 
         # Build info strings for reasoning
@@ -289,12 +375,44 @@ def scan_and_buy(wallet, regime):
             "reasoning": f"[{score}/8 | {regime}] {reason_str} | {atr_str} | {rs_str}{peg_str}{news_str}",
         }
 
+        controls = _control_state()
+        if controls.get("approval_mode", "auto") == "manual":
+            approval = _APPROVAL_QUEUE.create(
+                {
+                    "ticker": ticker,
+                    "signals": signals,
+                    "candidate_sector": candidate_sector,
+                    "score": score,
+                    "regime": regime,
+                    "proposed_price": close,
+                }
+            )
+            print(f"  Approval queued for {ticker} (id={approval['id']})")
+            _DECISION_LOGGER.log(
+                event="candidate_queued_for_approval",
+                ticker=ticker,
+                reason="manual_approval_mode",
+                context={"approval_id": approval["id"], "score": score},
+            )
+            continue
+
         if pf.execute_buy(wallet, ticker, close, atr=atr, regime=regime, signals=signals):
             pos = wallet["holdings"][ticker]
             sector_count[candidate_sector] = sector_count.get(candidate_sector, 0) + 1
             print(f"  >> EXECUTED BUY: {ticker} @ ${close:.2f} (Score: {score}/8, {regime}, {candidate_sector})")
             print(f"     SL: ${pos['sl']:.2f} | TP1: ${pos['tp1']:.2f} (2R) | TP2: ${pos['tp2']:.2f} (3R) | TP3: ${pos['tp3']:.2f} (4R)")
             print(f"     {reason_str}")
+            _DECISION_LOGGER.log(
+                event="buy_executed",
+                ticker=ticker,
+                reason="score_passed",
+                context={
+                    "score": score,
+                    "regime": regime,
+                    "sector": candidate_sector,
+                    "reasoning": reason_str,
+                },
+            )
             trade_alert("BUY", ticker)
             found += 1
 
@@ -600,6 +718,11 @@ def premarket_warmup():
 
 def run_live_cycle():
     print(f"\n[{pf.now_et().strftime('%H:%M:%S ET')}] Heartbeat...")
+    controls = _control_state()
+    if not controls.get("running", True):
+        print("  ControlCenter: running=false. Cycle skipped.")
+        _DECISION_LOGGER.log(event="cycle_skipped", reason="control_running_false")
+        return
 
     market_open, status = pf.is_market_open()
     if not market_open:
@@ -610,6 +733,13 @@ def run_live_cycle():
         return
 
     wallet = pf.load_wallet()
+    if controls.get("emergency_flatten"):
+        print("  ControlCenter: emergency_flatten=true. Flattening all swing positions...")
+        _flatten_all_positions(wallet)
+        controls["emergency_flatten"] = False
+        _CONTROL_STORE.save(controls)
+        _DECISION_LOGGER.log(event="emergency_flatten_triggered", reason="control_state_flag")
+        _alert("emergency_flatten_triggered", "Emergency flatten executed", {})
 
     # 1. Refresh cache (hourly data + daily for regime/RS)
     if _cache.tickers:
@@ -620,6 +750,9 @@ def run_live_cycle():
     # 2. Check market regime
     regime = _cache.get_market_regime()
     print(f"  Market Regime: {regime}")
+
+    # Manual approval workflow: execute pre-approved entries before new scan
+    _process_approved_entries(wallet, regime)
 
     # 3. Update Existing Positions
     update_holdings(wallet)
@@ -637,7 +770,10 @@ def run_live_cycle():
 
     # 6. Scan & Buy (regime gate is inside scan_and_buy)
     swing_count = pf.count_swing_positions(wallet)
-    if swing_count < pf.MAX_POSITIONS and wallet["cash"] > 1000:
+    if controls.get("pause_buys"):
+        print("  ControlCenter: pause_buys=true. Skipping new entries.")
+        _DECISION_LOGGER.log(event="entries_skipped", reason="pause_buys")
+    elif swing_count < pf.MAX_POSITIONS and wallet["cash"] > 1000:
         # Free baseline cash if needed for a swing trade
         if wallet["cash"] < 5000 and pf.BASELINE_TICKER in wallet["holdings"]:
             qqq_price = _cache.get_latest_price(pf.BASELINE_TICKER) or _get_live_price(pf.BASELINE_TICKER)
@@ -655,6 +791,60 @@ def run_live_cycle():
     print(f"  Cycle Complete. Equity: ${equity:,.0f} | Fees: ${fees:,.2f} | Swing: {swing_count}/{pf.MAX_POSITIONS} ({regime})")
 
 
+def _flatten_all_positions(wallet):
+    """Emergency flatten all non-baseline positions."""
+    for ticker in list(wallet["holdings"].keys()):
+        pos = wallet["holdings"].get(ticker)
+        if not pos or pos.get("is_baseline"):
+            continue
+        try:
+            price = _cache.get_latest_price(ticker) or _get_live_price(ticker)
+            qty = pos.get("qty", 0)
+            if qty > 0:
+                pnl = pf.execute_sell(wallet, ticker, price, qty, "Emergency Flatten")
+                _DECISION_LOGGER.log(
+                    event="emergency_flatten_sell",
+                    ticker=ticker,
+                    reason="ControlCenter emergency_flatten",
+                    context={"pnl": pnl, "qty": qty, "price": price},
+                )
+        except Exception as e:
+            print(f"  Flatten warning for {ticker}: {e}")
+    pf.save_wallet(wallet)
+
+
+def _process_approved_entries(wallet, regime):
+    """Execute approved manual entries from approval queue."""
+    approved = _APPROVAL_QUEUE.list(status="approved")
+    if not approved:
+        return
+    for item in approved:
+        payload = item.get("payload", {})
+        ticker = payload.get("ticker")
+        if not ticker or ticker in wallet["holdings"]:
+            _APPROVAL_QUEUE.mark_executed(item["id"], "skipped (invalid or already held)")
+            continue
+        row = _cache.get_latest_row(ticker)
+        if row is None:
+            _APPROVAL_QUEUE.mark_executed(item["id"], "skipped (no market row)")
+            continue
+        price = float(row.get("Close"))
+        atr = _cache.get_atr(ticker)
+        signals = payload.get("signals", {"reasoning": "Approved manual entry"})
+        ok = pf.execute_buy(wallet, ticker, price, atr=atr, regime=regime, signals=signals)
+        if ok:
+            _DECISION_LOGGER.log(
+                event="buy_executed",
+                ticker=ticker,
+                reason="manual_approval",
+                context={"approval_id": item["id"]},
+            )
+            _APPROVAL_QUEUE.mark_executed(item["id"], "executed")
+        else:
+            _APPROVAL_QUEUE.mark_executed(item["id"], "skipped (buy failed)")
+    pf.save_wallet(wallet)
+
+
 def _get_live_price(ticker):
     data = yf.download(ticker, period="1d", interval="1m", progress=False)
     close_col = data["Close"]
@@ -667,6 +857,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Live Money Machine - Institutional Swing")
+    parser.add_argument("--config", type=str, help="Path to runtime YAML config")
+    parser.add_argument("--profile", type=str, help="Config profile name (conservative|balanced|aggressive)")
+    parser.add_argument("--set", action="append", default=[], help="Override config key=value (repeatable)")
     parser.add_argument("--reset", action="store_true", help="Reset wallet to $100k")
     parser.add_argument("--loop", action="store_true", help="Run in infinite loop")
     parser.add_argument("--buy", type=str, help="Force buy a ticker (e.g. --buy NVDA)")
@@ -674,11 +867,16 @@ if __name__ == "__main__":
     parser.add_argument("--status", action="store_true", help="Show current portfolio status")
     parser.add_argument("--warmup", action="store_true", help="Run pre-market warmup (cache + briefing)")
     parser.add_argument("--deploy-baseline", action="store_true", help="Deploy idle cash to QQQ baseline")
+    parser.add_argument("--control-api", action="store_true", help="Run local control center API server")
     args = parser.parse_args()
+    apply_runtime_config(args.config, args.profile, args.set)
 
     if args.reset:
         pf.reset_wallet(INITIAL_CAPITAL)
         print("Wallet reset to $100,000.")
+
+    elif args.control_api:
+        run_control_center()
 
     elif args.buy:
         ticker = args.buy.upper()

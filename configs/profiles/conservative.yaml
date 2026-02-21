@@ -1,0 +1,16 @@
+risk:
+  max_positions_per_sector: 2
+  daily_loss_halt_pct: 0.02
+  max_open_risk_pct_of_equity: 0.06
+  max_new_position_risk_pct_of_equity: 0.015
+  max_position_notional_pct: 0.06
+
+features:
+  news_enabled: true
+  earnings_enabled: true
+
+execution:
+  order_mode: limit
+  no_trade_first_minutes: 15
+  no_trade_last_minutes: 20
+  limit_offset_pct: 0.0015
