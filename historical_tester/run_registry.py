@@ -36,3 +36,8 @@ class RunRegistry:
         with leaderboard.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, default=str) + "\n")
 
+    def save_artifact(self, run_dir: Path, filename: str, payload: dict[str, Any]) -> Path:
+        out = run_dir / filename
+        out.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        return out
+

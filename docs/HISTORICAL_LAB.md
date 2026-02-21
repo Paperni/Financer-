@@ -1,19 +1,36 @@
 # Historical Lab
 
-The historical tester now supports advanced experiment modes:
+The historical lab is the fast validation surface for strategy changes. It now supports
+engine adapters, benchmark reports, optimizer ranking, and validation contracts.
 
-- `single`: one run over selected period
-- `sweep`: parameter sweep over override sets
-- `walk`: rolling walk-forward windows
-- `compare`: A/B profile comparison
+## Modes
 
-## Components
+- `single`: run one backtest on one engine
+- `benchmark`: run multiple engines on the same window and write standardized report output
+- `sweep`: objective-ranked override sweep via optimizer contract
+- `interactive`: prompt-driven mode selector
 
-- `historical_tester/optimizer.py`
-- `historical_tester/run_registry.py`
-- `historical_tester/tester.py` (interactive mode selector)
+## Engines
 
-## Run Artifact Layout
+- `native`: existing internal replay path (baseline)
+- `backtrader`: adapter PoC that integrates through the same engine interface
+
+## Optimizer + Validation
+
+- `historical_tester/optimizers/freqtrade_style.py`: objective ranking with constraints
+- `historical_tester/validators/lean_adapter.py`: LEAN-style parity validator contract
+
+## Commands
+
+```bash
+python -m historical_tester --mode single --engine native
+python -m historical_tester --mode single --engine backtrader
+python -m historical_tester --mode benchmark --engines native,backtrader
+python -m historical_tester --mode benchmark --engines native,backtrader --validate-with lean
+python -m historical_tester --mode sweep --engine native
+```
+
+## Artifacts
 
 ```mermaid
 flowchart TD
@@ -23,4 +40,8 @@ flowchart TD
     runId --> meta[meta.json]
     runId --> summary[summary.json]
     runs --> leaderboard[leaderboard.jsonl]
+    testResults --> bench[benchmarks]
+    bench --> bjson[benchmark_*.json]
+    bench --> bcsv[benchmark_*.csv]
+    bench --> bhtml[benchmark_*.html]
 ```

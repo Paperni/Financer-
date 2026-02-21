@@ -45,6 +45,7 @@ class HistoricalTester:
                  speed_multiplier: float | None = None,
                  enable_news: bool | None = None,
                  enable_earnings: bool | None = None,
+                 engine: str = "native",
                  config_path: str | None = None,
                  profile: str | None = None,
                  overrides: list[str] | None = None):
@@ -67,6 +68,7 @@ class HistoricalTester:
         )
         self.config_path = config_path
         self.profile = profile
+        self.engine = engine
 
         self.start_date = start_date
         self.end_date = end_date
@@ -115,6 +117,7 @@ class HistoricalTester:
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "profile": self.profile,
+            "engine": self.engine,
             "config_path": self.config_path,
             "runtime_cfg": self.runtime_cfg,
         }
@@ -160,6 +163,7 @@ class HistoricalTester:
                 "start_date": test_config["start_date"],
                 "end_date": test_config["end_date"],
                 "profile": test_config["profile"],
+                "engine": self.engine,
                 "total_return_pct": final_metrics.get("total_return_pct", 0),
                 "win_rate_pct": final_metrics.get("win_rate_pct", 0),
                 "max_drawdown_pct": final_metrics.get("max_drawdown_pct", 0),
@@ -582,7 +586,8 @@ def interactive_cli():
     print("  HISTORICAL TRADING TESTER")
     print("="*60 + "\n")
 
-    mode = input("Mode (single/sweep/walk/compare) [default: single]: ").strip().lower() or "single"
+    mode = input("Mode (single/sweep/walk/compare/benchmark) [default: single]: ").strip().lower() or "single"
+    engine = input("Engine (native/backtrader) [default: native]: ").strip().lower() or "native"
     
     # Get start date
     while True:
@@ -665,6 +670,7 @@ def interactive_cli():
         enable_earnings=enable_earnings,
         config_path=config_path,
         profile=profile,
+        engine=engine,
     )
     if mode == "single":
         tester.run()
@@ -689,7 +695,7 @@ def interactive_cli():
             "config_path": config_path,
             "profile": profile,
         }
-        results = run_parameter_sweep(base_kwargs, sweep_sets)
+        results = run_parameter_sweep(base_kwargs, sweep_sets, engine=engine)
         print(f"Sweep completed: {len(results)} runs")
     elif mode == "walk":
         try:
@@ -707,7 +713,7 @@ def interactive_cli():
             "config_path": config_path,
             "profile": profile,
         }
-        results = run_walk_forward(base_kwargs, window_days=30, step_days=15)
+        results = run_walk_forward(base_kwargs, window_days=30, step_days=15, engine=engine)
         print(f"Walk-forward completed: {len(results)} windows")
     elif mode == "compare":
         try:
@@ -725,8 +731,33 @@ def interactive_cli():
             "enable_earnings": enable_earnings,
             "config_path": config_path,
         }
-        res = run_ab_compare(base_kwargs, profile, prof_b)
+        res = run_ab_compare(base_kwargs, profile, prof_b, engine=engine)
         print(f"Compare complete. Delta return: {res['delta_return_pct']:+.2f}%")
+    elif mode == "benchmark":
+        try:
+            from .orchestrator import run_benchmark_suite
+        except ImportError:
+            from orchestrator import run_benchmark_suite
+        engine_list = input("Engines csv [default: native,backtrader]: ").strip() or "native,backtrader"
+        validate_with = input("Validate with lean? (y/n) [default: n]: ").strip().lower()
+        engine_names = [name.strip() for name in engine_list.split(",") if name.strip()]
+        base_kwargs = {
+            "start_date": start_date,
+            "end_date": end_date,
+            "initial_capital": initial_capital,
+            "wallet_path": wallet_path,
+            "speed_multiplier": speed_multiplier,
+            "enable_news": enable_news,
+            "enable_earnings": enable_earnings,
+            "config_path": config_path,
+            "profile": profile,
+        }
+        suite = run_benchmark_suite(
+            engine_names=engine_names,
+            tester_kwargs=base_kwargs,
+            validate_with="lean" if validate_with == "y" else None,
+        )
+        print(f"Benchmark complete. Artifacts: {suite['report_paths']}")
     else:
         print("Unknown mode; running single.")
         tester.run()

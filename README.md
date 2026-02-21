@@ -24,6 +24,12 @@ Use Python 3.12+ in a virtual environment, then install core dependencies:
 python -m pip install yfinance pandas numpy plotly beautifulsoup4 lxml peewee textblob pyyaml
 ```
 
+Optional test dependency:
+
+```bash
+python -m pip install pytest
+```
+
 ## Documentation Entry Points
 
 - `docs/START_HERE.md` - setup and first execution steps
@@ -33,6 +39,10 @@ python -m pip install yfinance pandas numpy plotly beautifulsoup4 lxml peewee te
 - `docs/RISK_ENGINE_V2.md` - portfolio-level risk gate behavior
 - `docs/EXECUTION_ENGINE.md` - execution model and fill simulation behavior
 - `docs/HISTORICAL_LAB.md` - replay/sweep/walk-forward/compare behavior
+- `docs/ENGINE_INTERFACE.md` - engine adapter contracts (`native`, `backtrader`)
+- `docs/BENCHMARK_REPORT.md` - standardized benchmark output format
+- `docs/OPTIMIZER_GUIDE.md` - objective-driven optimizer contract
+- `docs/LEAN_VALIDATION.md` - LEAN parity validation adapter
 - `docs/API_CONTROL_CENTER.md` - control API endpoints
 - `docs/EXPLAINABILITY.md` - decision log structure and usage
 - `docs/ALERTS_AND_APPROVALS.md` - alerts and manual approval workflow
@@ -53,6 +63,11 @@ python live_trader.py --loop --profile balanced
 
 # Historical replay
 python -m historical_tester
+python -m historical_tester --mode single --engine native
+python -m historical_tester --mode single --engine backtrader
+python -m historical_tester --mode benchmark --engines native,backtrader
+python -m historical_tester --mode benchmark --engines native,backtrader --validate-with lean
+python -m historical_tester --mode sweep --engine native
 ```
 
 ## Typical Workflows
@@ -70,8 +85,26 @@ python -m historical_tester
 
 - **Historical validation workflow**
   - run `python -m historical_tester`
-  - choose mode (`single`, `sweep`, `walk`, `compare`)
+  - choose mode (`single`, `benchmark`, `sweep`, `interactive`)
+  - choose engine (`native` or `backtrader`) for mode-compatible flows
+  - optional parity check with `--validate-with lean` in benchmark mode
   - inspect output artifacts in `test_results/`
+
+## Smoke Test Checklist
+
+Run from `Financer-/`:
+
+```bash
+python -m compileall historical_tester tests
+python -m historical_tester --help
+python -m historical_tester --mode benchmark --engines native,backtrader --validate-with lean --start-date 2024-01-01 --end-date 2024-01-15
+```
+
+If you want contract tests:
+
+```bash
+python -m pytest -q tests/test_engine_contract.py tests/test_backtrader_engine_smoke.py tests/test_optimizer_contract.py tests/test_lean_adapter_contract.py
+```
 
 ## Functional Areas
 

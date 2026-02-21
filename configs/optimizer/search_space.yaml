@@ -1,0 +1,14 @@
+risk:
+  max_positions_per_sector:
+    - 2
+    - 3
+    - 4
+execution:
+  order_mode:
+    - market
+    - limit
+features:
+  news_enabled:
+    - false
+    - true
+
