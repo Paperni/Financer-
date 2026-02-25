@@ -40,3 +40,11 @@ logs/
 
 # Claude settings
 .claude/
+
+# Custom ignores for test and cache files
+test_results/
+test_wallet.json
+test_wallet_equity.json
+.pytest_cache/
+data/cache/
+*.parquet
