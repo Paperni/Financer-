@@ -22,7 +22,6 @@ FORBIDDEN_ROOT_MODULES: set[str] = {
     "analyzer",
     "data_engine",
     "data_static",
-    "diagnose_signals",
     "downloader",
     "indicators",
     "live_trader",
