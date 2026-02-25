@@ -64,7 +64,13 @@ class HistoricalDataCache:
         if not isinstance(df.index, pd.DatetimeIndex):
             return df
         # Filter to rows <= max_time
-        mask = df.index <= max_time
+        max_ts = pd.Timestamp(max_time)
+        if df.index.tz is not None and max_ts.tz is None:
+            max_ts = max_ts.tz_localize(df.index.tz)
+        elif df.index.tz is None and max_ts.tz is not None:
+            max_ts = max_ts.tz_localize(None)
+        
+        mask = df.index <= max_ts
         return df[mask].copy()
     
     def _update_base_cache_slice(self):

@@ -115,12 +115,39 @@ def load_wallet():
         return reset_wallet()
 
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        import numpy as np
+        import pandas as pd
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        return super(NpEncoder, self).default(obj)
+
 def save_wallet(wallet):
     wallet["last_update"] = now_str()
     tmp = WALLET_FILE + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(wallet, f, indent=4)
-    os.replace(tmp, WALLET_FILE)
+        json.dump(wallet, f, indent=4, cls=NpEncoder)
+    
+    import time
+    for _ in range(5):
+        try:
+            os.replace(tmp, WALLET_FILE)
+            break
+        except PermissionError:
+            time.sleep(0.1)
+    else:
+        # Fallback if replace still fails
+        os.remove(WALLET_FILE) if os.path.exists(WALLET_FILE) else None
+        os.rename(tmp, WALLET_FILE)
 
 
 def reset_wallet(initial_capital=100000.0):
@@ -151,7 +178,18 @@ def save_equity_curve(curve):
     tmp = EQUITY_FILE + ".tmp"
     with open(tmp, "w") as f:
         json.dump(curve, f)
-    os.replace(tmp, EQUITY_FILE)
+        
+    import time
+    for _ in range(5):
+        try:
+            os.replace(tmp, EQUITY_FILE)
+            break
+        except PermissionError:
+            time.sleep(0.1)
+    else:
+        # Fallback if replace still fails
+        os.remove(EQUITY_FILE) if os.path.exists(EQUITY_FILE) else None
+        os.rename(tmp, EQUITY_FILE)
 
 
 def append_equity(equity_value, max_points=2000):
