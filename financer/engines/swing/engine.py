@@ -7,11 +7,21 @@ from __future__ import annotations
 
 import pandas as pd
 
+from financer.features.build import ENTRY_REQUIRED_COLUMNS
 from financer.models.enums import Conviction, Direction, EngineSource, TimeHorizon
 from financer.models.intents import TradeIntent
+from financer.models.risk import check_regime_allows_entry
 
 from .draft import draft_assets
 from .scorecard import score_setup
+
+
+def check_entry_readiness(row: pd.Series) -> bool:
+    """Ensure the feature row has all required columns and non-null values for an entry."""
+    for col in ENTRY_REQUIRED_COLUMNS:
+        if col not in row or pd.isna(row[col]):
+            return False
+    return True
 
 
 class SwingEngine:
@@ -31,6 +41,15 @@ class SwingEngine:
         # 2. Score setups
         for ticker in drafted_tickers:
             row = latest_features[ticker]
+
+            # Enforce strict domain boundaries
+            if not check_entry_readiness(row):
+                continue
+                
+            regime_allowed, _ = check_regime_allows_entry(row.get("regime"))
+            if not regime_allowed:
+                continue
+
             score, reasons = score_setup(row)
 
             if score >= self.min_entry_score:

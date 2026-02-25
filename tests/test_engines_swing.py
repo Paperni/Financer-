@@ -34,7 +34,9 @@ def test_swing_engine_emits_trade_intent():
 
     # Strong momentum and perfect setup
     perfect_row = pd.Series({
+        "sma_50": 100.0,
         "above_50": True,
+        "regime": Regime.RISK_ON,
         "rsi_14": 35.0,
         "macd_hist": 0.5,
         "rs_20": 1.1,
@@ -47,7 +49,9 @@ def test_swing_engine_emits_trade_intent():
 
     # Weak momentum and terrible setup
     bad_row = pd.Series({
+        "sma_50": 100.0,
         "above_50": False,
+        "regime": Regime.RISK_OFF,
         "rsi_14": 80.0,
         "macd_hist": -0.5,
         "rs_20": 0.9,
