@@ -12,12 +12,12 @@ from typing import Optional
 from tqdm import tqdm
 
 try:
-    from indicators import DataCache, calculate_indicators
+    from legacy.indicators import DataCache, calculate_indicators
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from indicators import DataCache, calculate_indicators
+    from legacy.indicators import DataCache, calculate_indicators
 
 
 class HistoricalDataCache:

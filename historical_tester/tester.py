@@ -13,10 +13,12 @@ from tqdm import tqdm
 
 # Add parent directory to path to import modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
+# Also ensure historical_tester/ is on path for bare script-mode imports
+sys.path.insert(0, str(Path(__file__).parent))
 
-import portfolio as pf
-from data_static import BROAD_STOCKS, BROAD_ETFS
-from indicators import check_buy_signal_detailed, check_volume_contraction
+import legacy.portfolio as pf
+from legacy.data_static import BROAD_STOCKS, BROAD_ETFS
+from legacy.indicators import check_buy_signal_detailed, check_volume_contraction
 from core.strategy.config_loader import load_runtime_config
 from core.execution.execution_engine import ExecutionEngine
 
