@@ -2,6 +2,84 @@
 
 This document gives a visual overview of system components and execution paths.
 
+## Financer Brain — Target Architecture
+
+The platform is being refactored into a layered "Brain" with two engines,
+a CIO Orchestrator, and a Risk Governor. Engines emit intents, not orders.
+
+```mermaid
+flowchart TD
+    subgraph data [Data Layer]
+        yfinance[yfinance / SEC EDGAR]
+        cache[DataCache]
+        news[News Engine]
+    end
+
+    subgraph features [Feature Store]
+        technical_f[Technical Indicators]
+        fundamental_f[Fundamental Scores]
+        sentiment_f[Sentiment Signals]
+    end
+
+    subgraph engines [Engines — emit intents only]
+        lt[Long-Term Investor Engine]
+        sw[Swing Trader Engine]
+    end
+
+    subgraph cio [CIO Orchestrator — creates orders]
+        merge[Intent Merger]
+        sizing[Position Sizing]
+        plan[ActionPlan]
+    end
+
+    subgraph risk [Risk Governor — can veto]
+        checks[Risk Checks]
+        veto[Approve / Veto]
+    end
+
+    subgraph exec [Execution]
+        paper[Paper Trading]
+        live[Live Execution]
+    end
+
+    subgraph logs [Replay and Logs]
+        replay[Historical Replay]
+        decisions[Decision Logger]
+    end
+
+    data --> features
+    features --> engines
+    engines -->|TradeIntent / AllocationIntent| cio
+    cio -->|Order / ActionPlan| risk
+    risk -->|Approved Orders| exec
+    exec --> logs
+    cio --> logs
+```
+
+### Core schemas (`financer/models/`)
+
+| Model | Module | Purpose |
+|-------|--------|---------|
+| `TradeIntent` | `intents.py` | Engine recommendation (ticker, direction, conviction, reasons) |
+| `AllocationIntent` | `intents.py` | Engine desired portfolio split |
+| `ReasonCode` | `intents.py` | Explainable reason attached to any intent |
+| `Order` | `actions.py` | Concrete sized order (CIO output) |
+| `ActionPlan` | `actions.py` | Batch of orders + allocation shifts |
+| `PositionState` | `portfolio.py` | Single position with P&L properties |
+| `PortfolioSnapshot` | `portfolio.py` | Full portfolio view (cash + positions) |
+| `RiskState` | `risk.py` | Current risk metrics (regime, drawdown, sector counts) |
+| `RiskVeto` | `risk.py` | Risk Governor decision on an order |
+| `EventFlags` | `events.py` | Cross-engine coordination flags |
+| `position_size()` | `sizing.py` | Pure function: ATR-based qty/stop/TP calculation |
+
+### Import boundaries (non-negotiable)
+
+- **`financer/` never imports root-level scripts. Enforced by `tests/test_import_boundary.py`.**
+- `financer/models/` imports nothing outside itself
+- `financer/data/` will not import `financer/engines/`
+- `financer/engines/` will not import `financer/execution/`
+- Only `financer/orchestrator/` creates `Order` and `ActionPlan` objects
+
 ## High-Level Components
 
 ```mermaid
