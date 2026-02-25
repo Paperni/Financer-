@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import legacy.portfolio as pf
 from legacy.data_static import BROAD_STOCKS, BROAD_ETFS
 from legacy.indicators import check_buy_signal_detailed, check_volume_contraction
-from core.strategy.config_loader import load_runtime_config
-from core.execution.execution_engine import ExecutionEngine
+from legacy.core.strategy.config_loader import load_runtime_config
+from legacy.core.execution.execution_engine import ExecutionEngine
 
 # Handle both module and script execution
 try:

@@ -42,6 +42,8 @@ logs/
 .claude/
 
 # Test outputs and caches
+data/
+reports/
 test_results/
 test_wallet.json
 test_wallet_equity.json

@@ -24,10 +24,7 @@ ALLOWED_ROOT_DIRS: set[str] = {
     "configs",
     "control_center",
     "tools",
-    "data",          # cached data downloads
-    "core",          # legacy core/ strategy/execution modules (pre-financer era)
-    "reports",       # generated test/analysis HTML reports
-    "test_results",  # historical tester run outputs
+    "artifacts",     # gitignored runtime cache/outputs
 }
 
 ALLOWED_ROOT_FILES: set[str] = {

@@ -5,14 +5,14 @@ import portfolio as pf
 from indicators import (
     DataCache, check_buy_signal_detailed, check_volume_contraction,
 )
-from core.strategy.config_loader import load_runtime_config
-from core.risk.risk_engine_v2 import RiskEngineV2
+from legacy.core.strategy.config_loader import load_runtime_config
+from legacy.core.risk.risk_engine_v2 import RiskEngineV2
 from control_center.state_store import ControlStateStore
 from control_center.api import run_control_center
 from control_center.approvals import ApprovalQueue
-from core.explainability.decision_logger import DecisionLogger
-from core.alerts.notifier import AlertNotifier
-from core.alerts.rules import should_alert
+from legacy.core.explainability.decision_logger import DecisionLogger
+from legacy.core.alerts.notifier import AlertNotifier
+from legacy.core.alerts.rules import should_alert
 
 try:
     import winsound
