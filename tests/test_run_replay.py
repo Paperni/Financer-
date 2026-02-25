@@ -37,17 +37,18 @@ def test_golden_replay_deterministic_no_network(tmp_path):
             min_entry_score=4.0
         )
         
-    assert len(trade_log) == 2  # One BUY, One SELL (Take Profit)
+    filled = [t for t in trade_log if t["status"] == "FILLED"]
+    assert len(filled) == 2  # One BUY, One SELL (Take Profit)
     
-    assert trade_log[0]["direction"] == "BUY"
-    assert trade_log[0]["ticker"] == "SYNTH"
-    assert trade_log[0]["status"] == "FILLED"
-    assert trade_log[0]["price"] == 100.0
+    assert filled[0]["direction"] == "BUY"
+    assert filled[0]["ticker"] == "SYNTH"
+    assert filled[0]["status"] == "FILLED"
+    assert filled[0]["price"] == 100.0
     
-    assert trade_log[1]["direction"] == "SELL"
-    assert trade_log[1]["ticker"] == "SYNTH"
-    assert trade_log[1]["status"] == "FILLED"
-    assert trade_log[1]["price"] == 110.0
+    assert filled[1]["direction"] == "SELL"
+    assert filled[1]["ticker"] == "SYNTH"
+    assert filled[1]["status"] == "FILLED"
+    assert filled[1]["price"] == 110.0
     
     assert len(equity_curve) == 3
     assert equity_curve[-1]["equity"] > 100_000.0
@@ -159,5 +160,11 @@ def test_integrity_no_multiple_buys():
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
         port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
-    assert len(trades) == 1
-    assert trades[0]["direction"] == "BUY"
+    
+    filled = [t for t in trades if t["status"] == "FILLED"]
+    assert len(filled) == 1
+    assert filled[0]["direction"] == "BUY"
+    
+    vetoed = [t for t in trades if t["status"] == "VETOED"]
+    assert len(vetoed) == 1
+    assert "anti-pyramiding" in vetoed[0]["veto_reason"]

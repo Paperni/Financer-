@@ -53,6 +53,8 @@ def run_replay(
     engine = SwingEngine(min_entry_score=min_entry_score)
     orchestrator = CIOOrchestrator()
     broker = SimBroker()
+    from financer.execution.position_manager import PositionManager
+    pos_manager = PositionManager()
     
     portfolio = PortfolioSnapshot(cash=initial_cash, positions=[])
     risk_state = RiskState(regime=Regime.RISK_ON, open_risk_pct=0.0)
@@ -97,9 +99,11 @@ def run_replay(
 
         # Get Intents from Swing Engine
         alloc_intent = determine_allocation(risk_state.regime)
-        trade_intents = engine.evaluate(latest_features, portfolio)
+        trade_intents = engine.evaluate(latest_features)
         
-        all_intents = trade_intents
+        exit_intents = pos_manager.evaluate_exits(portfolio, latest_features, current_day)
+        
+        all_intents = trade_intents + exit_intents
 
         if all_intents:
             # We already injected metas in the engine, but orchestrator uses them

@@ -7,13 +7,18 @@ from financer.models.enums import Direction, OrderStatus
 from financer.models.risk import RiskState, RiskVeto
 
 
+from financer.models.portfolio import PortfolioSnapshot
+
+
 class RiskGovernor:
     """Evaluates orders against portfolio risk limits."""
 
     def __init__(self, max_open_risk_pct: float = 0.20):
         self.max_open_risk_pct = max_open_risk_pct
 
-    def evaluate_order(self, order: Order, state: RiskState) -> tuple[Order, RiskVeto]:
+    def evaluate_order(
+        self, order: Order, state: RiskState, portfolio: PortfolioSnapshot | None = None
+    ) -> tuple[Order, RiskVeto]:
         """Check an order against current risk parameters.
         
         If vetoed, the Order status is mutated to VETOED.
@@ -40,6 +45,15 @@ class RiskGovernor:
         checks_passed = []
         checks_failed = []
 
+        # 1. Anti-pyramiding
+        if portfolio is not None:
+            existing = [p for p in portfolio.positions if p.ticker == order.ticker]
+            if existing:
+                checks_failed.append(f"ticker_already_held: {order.ticker} (anti-pyramiding)")
+            else:
+                checks_passed.append("anti_pyramiding_ok")
+
+        # 2. Max Open Risk
         if state.open_risk_pct >= self.max_open_risk_pct:
             checks_failed.append(f"open_risk_pct ({state.open_risk_pct:.2%}) >= max ({self.max_open_risk_pct:.2%})")
         else:

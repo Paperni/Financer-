@@ -78,7 +78,9 @@ class CIOOrchestrator:
             )
 
             # 2. Ask Risk Governor for veto/approval
-            order, _veto = self.governor.evaluate_order(order, risk_state)
+            order, veto = self.governor.evaluate_order(order, risk_state, portfolio)
+            if veto.vetoed:
+                order.meta["veto_reason"] = veto.reason
 
             plan.orders.append(order)
 
