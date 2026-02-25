@@ -1,0 +1,15 @@
+{
+    "run_id": "sample_run_v1",
+    "timeframe": "1d",
+    "universe": [
+        "AAPL"
+    ],
+    "loop_interval_seconds": 60,
+    "mode": "auto",
+    "max_positions": 5,
+    "max_daily_dd_pct": 0.02,
+    "max_heat_pct": 0.2,
+    "max_ticker_exposure_pct": 0.05,
+    "artifact_root": "artifacts/live",
+    "timezone": "UTC"
+}
