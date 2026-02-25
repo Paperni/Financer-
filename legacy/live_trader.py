@@ -613,7 +613,7 @@ def update_dashboard_html(wallet, regime="UNKNOWN"):
     </html>
     """
 
-    with open("docs/dashboard.html", "w", encoding="utf-8") as f:
+    with open("docs/dashboards/dashboard.html", "w", encoding="utf-8") as f:
         f.write(html)
 
 

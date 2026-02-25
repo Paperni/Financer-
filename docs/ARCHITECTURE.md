@@ -101,7 +101,7 @@ flowchart LR
         indicators[indicators.py]
         portfolio[portfolio.py]
         runtimeFiles[wallet.json and equity_curve.json]
-        dashboard[dashboard.html]
+        dashboard[docs/dashboards/dashboard.html]
         liveTrader --> indicators
         liveTrader --> portfolio
         liveTrader --> runtimeFiles
