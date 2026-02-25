@@ -74,30 +74,7 @@ def run_replay(
         if not latest_features:
             continue
 
-        # Very basic mock-logic to exit positions if simulated SL/TP is hit
-        # In a real system, the broker or a dedicated Risk Engine handles exit intents
-        exit_intents = []
-        for pos in portfolio.positions:
-            if pos.ticker in latest_features:
-                curr_price = float(latest_features[pos.ticker].get("Close", pos.current_price))
-                pos.current_price = curr_price  # Mark to market
-                
-                # Check limits
-                hit_sl = pos.stop_loss and curr_price <= pos.stop_loss
-                hit_tp = pos.take_profit_1 and curr_price >= pos.take_profit_1
-                
-                if hit_sl or hit_tp:
-                    exit_intents.append(
-                        TradeIntent(
-                            ticker=pos.ticker,
-                            direction=Direction.SELL,
-                            conviction=Conviction.HIGH,
-                            time_horizon=TimeHorizon.SWING,
-                            source=EngineSource.SWING,
-                            reasons=[],
-                            meta={"latest_price": curr_price}
-                        )
-                    )
+        # Engine now handles exits. We pass the portfolio.
 
         # Update RiskState (Daily mark-to-market)
         risk_op_pct = 0.0
@@ -120,15 +97,15 @@ def run_replay(
 
         # Get Intents from Swing Engine
         alloc_intent = determine_allocation(risk_state.regime)
-        trade_intents = engine.evaluate(latest_features)
+        trade_intents = engine.evaluate(latest_features, portfolio)
         
-        # Combine Engine entries with our synthetic SL/TP exits
-        all_intents = trade_intents + exit_intents
+        all_intents = trade_intents
 
         if all_intents:
-            # Inject current price into metas for Orchestrator sizing
+            # We already injected metas in the engine, but orchestrator uses them
+            # Check if any missing meta and inject for safety
             for intent in all_intents:
-                if intent.ticker in latest_features:
+                if intent.ticker in latest_features and "latest_price" not in intent.meta:
                     intent.meta["latest_price"] = float(latest_features[intent.ticker].get("Close", 100))
                     intent.meta["atr_14"] = float(latest_features[intent.ticker].get("atr_14", 1.0))
 
@@ -164,23 +141,26 @@ def run_replay(
     # Save outputs
     print(f"\nReplay Complete! Final Equity: ${portfolio.equity:,.2f}")
     
-    with open("equity_curve.json", "w") as f:
-        json.dump(equity_curve, f, indent=2)
-        
-    with open("test_results/replay_trades.json", "w") as f:
-        json.dump(trade_log, f, indent=2)
-        
     return portfolio, equity_curve, trade_log
 
 
-if __name__ == "__main__":
-    # Ensure standard dirs exist
+def save_artifacts(equity_curve, trade_log, output_dir: str = "artifacts"):
+    """Helper to save artifacts."""
     import os
-    os.makedirs("test_results", exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
     
-    run_replay(
+    with open(f"{output_dir}/equity_curve.json", "w") as f:
+        json.dump(equity_curve, f, indent=2)
+        
+    with open(f"{output_dir}/replay_trades.json", "w") as f:
+        json.dump(trade_log, f, indent=2)
+
+
+if __name__ == "__main__":
+    portfolio, curve, trades = run_replay(
         tickers=["AAPL", "MSFT", "GOOGL", "SPY"],
         start="2024-01-01",
         end="2024-04-01",
         min_entry_score=3.0  # Loosened parameter as recommended in audit to guarantee trade execution for visibility
     )
+    save_artifacts(curve, trades)
