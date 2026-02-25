@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from financer.models.actions import Order
 from financer.models.enums import Direction, OrderStatus
+from financer.models.intents import TradeIntent
 from financer.models.risk import RiskState, RiskVeto
-
-
 from financer.models.portfolio import PortfolioSnapshot
 
 
@@ -15,6 +14,25 @@ class RiskGovernor:
 
     def __init__(self, max_open_risk_pct: float = 0.20):
         self.max_open_risk_pct = max_open_risk_pct
+
+    def veto_intents(
+        self, intents: list[TradeIntent], portfolio: PortfolioSnapshot
+    ) -> tuple[list[TradeIntent], list[TradeIntent]]:
+        """Filter intents prior to order sizing (e.g. anti-pyramiding)."""
+        approved = []
+        vetoed = []
+
+        # Tethers
+        held_tickers = {p.ticker for p in portfolio.positions}
+
+        for intent in intents:
+            if intent.direction == Direction.BUY and intent.ticker in held_tickers:
+                intent.meta["veto_reason"] = f"ticker_already_held: {intent.ticker} (anti-pyramiding)"
+                vetoed.append(intent)
+            else:
+                approved.append(intent)
+
+        return approved, vetoed
 
     def evaluate_order(
         self, order: Order, state: RiskState, portfolio: PortfolioSnapshot | None = None

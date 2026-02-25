@@ -37,18 +37,22 @@ def test_golden_replay_deterministic_no_network(tmp_path):
             min_entry_score=4.0
         )
         
-    filled = [t for t in trade_log if t["status"] == "FILLED"]
-    assert len(filled) == 2  # One BUY, One SELL (Take Profit)
+    # Flatten all filled orders across all days
+    all_filled = []
+    for day in trade_log:
+        all_filled.extend(day["filled_orders"])
+        
+    assert len(all_filled) == 2  # One BUY, One SELL (Take Profit)
     
-    assert filled[0]["direction"] == "BUY"
-    assert filled[0]["ticker"] == "SYNTH"
-    assert filled[0]["status"] == "FILLED"
-    assert filled[0]["price"] == 100.0
+    assert all_filled[0]["direction"] == "BUY"
+    assert all_filled[0]["ticker"] == "SYNTH"
+    assert all_filled[0]["status"] == "FILLED"
+    assert all_filled[0]["price"] == 100.0
     
-    assert filled[1]["direction"] == "SELL"
-    assert filled[1]["ticker"] == "SYNTH"
-    assert filled[1]["status"] == "FILLED"
-    assert filled[1]["price"] == 110.0
+    assert all_filled[1]["direction"] == "SELL"
+    assert all_filled[1]["ticker"] == "SYNTH"
+    assert all_filled[1]["status"] == "FILLED"
+    assert all_filled[1]["price"] == 110.0
     
     assert len(equity_curve) == 3
     assert equity_curve[-1]["equity"] > 100_000.0
@@ -118,7 +122,7 @@ def test_veto_unknown_regime():
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
         port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
-    assert len(trades) == 0
+    assert len(trades[0]["filled_orders"]) == 0
 
 
 def test_veto_missing_columns():
@@ -132,7 +136,7 @@ def test_veto_missing_columns():
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
         port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
-    assert len(trades) == 0
+    assert len(trades[0]["filled_orders"]) == 0
 
 
 def test_veto_earnings_blackout():
@@ -146,7 +150,7 @@ def test_veto_earnings_blackout():
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
         port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
-    assert len(trades) == 0
+    assert len(trades[0]["filled_orders"]) == 0
 
 
 def test_integrity_no_multiple_buys():
@@ -161,10 +165,14 @@ def test_integrity_no_multiple_buys():
     with patch("financer.cli.run_replay.build_features", return_value=df):
         port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
     
-    filled = [t for t in trades if t["status"] == "FILLED"]
-    assert len(filled) == 1
-    assert filled[0]["direction"] == "BUY"
+    # Assert Day 1 buys the ticket
+    day1 = trades[0]
+    assert len(day1["filled_orders"]) == 1
+    assert day1["filled_orders"][0]["direction"] == "BUY"
     
-    vetoed = [t for t in trades if t["status"] == "VETOED"]
-    assert len(vetoed) == 1
-    assert "anti-pyramiding" in vetoed[0]["veto_reason"]
+    # Assert Day 2 attempts to buy again but is caught by intent veto
+    day2 = trades[1]
+    assert len(day2["candidate_intents"]) == 1
+    assert len(day2["vetoed_intents"]) == 1
+    assert "anti-pyramiding" in day2["vetoed_intents"][0]["reason"]
+    assert len(day2["filled_orders"]) == 0

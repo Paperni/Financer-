@@ -21,12 +21,16 @@ class PositionManager:
 
     def evaluate_exits(
         self, portfolio: PortfolioSnapshot, latest_features: dict[str, pd.Series], current_date: datetime
-    ) -> list[TradeIntent]:
+    ) -> tuple[list[TradeIntent], dict[str, float]]:
         """Check all positions against execution policy derived limits.
         
-        Currently emits full liquidation SELL intents upon hitting any critical threshold.
+        Returns:
+            - A list of exit intents (TradeIntent)
+            - A dictionary mapping ticker to new updated stop loss (for trailing stops).
+              This keeps PositionManager purely functional without mutating the portfolio inline.
         """
         exit_intents = []
+        trail_updates = {}
         
         for pos in portfolio.positions:
             if pos.ticker not in latest_features:
@@ -34,7 +38,6 @@ class PositionManager:
                 
             row = latest_features[pos.ticker]
             curr_price = float(row.get("Close", pos.current_price))
-            pos.current_price = curr_price
             
             # Simple Time Stop
             days_held = (current_date.date() - pos.opened_at.date()).days
@@ -47,15 +50,15 @@ class PositionManager:
             if atr_14 > 0:
                 trail_price = curr_price - (TRAILING_STOP_ATR_MULTIPLIER * atr_14)
                 if pos.stop_loss is None or trail_price > pos.stop_loss:
-                    pos.stop_loss = trail_price  # Mutate trail stop upwards
+                    trail_updates[pos.ticker] = trail_price  # Suggest new trail stop upwards
             
             # Evaluate Stop Loss
-            if pos.stop_loss and curr_price <= pos.stop_loss:
+            current_stop_loss = trail_updates.get(pos.ticker, pos.stop_loss)
+            if current_stop_loss is not None and curr_price <= current_stop_loss:
                 exit_intents.append(self._create_exit_intent(pos, curr_price, "STOP_LOSS"))
                 continue
                 
-            # Evaluate TP Tiers (we assume initial SL was ~1.5 ATR from entry for 1R)
-            # To avoid the mutating stop_loss breaking math, calculate 1R statically
+            # Evaluate TP Tiers
             if atr_14 > 0:
                 risk_1r = STOP_LOSS_ATR_MULTIPLIER * atr_14
                 hit_tp = False
@@ -69,7 +72,7 @@ class PositionManager:
                     exit_intents.append(self._create_exit_intent(pos, curr_price, "TAKE_PROFIT_TIER"))
                     continue
                 
-        return exit_intents
+        return exit_intents, trail_updates
 
     def _create_exit_intent(self, pos: PositionState, curr_price: float, reason: str) -> TradeIntent:
         return TradeIntent(

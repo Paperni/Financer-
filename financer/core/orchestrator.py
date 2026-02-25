@@ -32,13 +32,14 @@ class CIOOrchestrator:
             # Simple tie-break: latest intent dict update
             for alloc_int in allocation_intents:
                 plan.allocation_shifts = {
-                    "cash_pct": alloc_int.cash_pct,
-                    "baseline_pct": alloc_int.baseline_pct,
-                    "swing_pct": alloc_int.swing_pct,
                 }
 
+        # Veto intents before execution (e.g. anti-pyramiding)
+        approved_trade_intents, vetoed_intents = self.governor.veto_intents(trade_intents, portfolio)
+        plan.vetoed_intents.extend(vetoed_intents)
+
         # Process trade intents
-        for intent in trade_intents:
+        for intent in approved_trade_intents:
             # 1. Size the intent into an Order
             # Map conviction string matching integer scores (5-8) for sizing
             score_map = {

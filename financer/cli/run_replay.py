@@ -77,6 +77,9 @@ def run_replay(
             continue
 
         # Engine now handles exits. We pass the portfolio.
+        for pos in portfolio.positions:
+            if pos.ticker in latest_features:
+                pos.current_price = float(latest_features[pos.ticker].get("Close", pos.current_price))
 
         # Update RiskState (Daily mark-to-market)
         risk_op_pct = 0.0
@@ -101,14 +104,34 @@ def run_replay(
         alloc_intent = determine_allocation(risk_state.regime)
         trade_intents = engine.evaluate(latest_features)
         
-        exit_intents = pos_manager.evaluate_exits(portfolio, latest_features, current_day)
+        exit_intents, trail_updates = pos_manager.evaluate_exits(portfolio, latest_features, current_day)
+        
+        # Apply pure trail updates mutations safely here
+        for pos in portfolio.positions:
+            if pos.ticker in trail_updates:
+                pos.stop_loss = trail_updates[pos.ticker]
         
         all_intents = trade_intents + exit_intents
+        
+        daily_log = {
+            "date": day_str,
+            "candidate_intents": [],
+            "vetoed_intents": [],
+            "created_orders": [],
+            "filled_orders": []
+        }
 
         if all_intents:
             # We already injected metas in the engine, but orchestrator uses them
             # Check if any missing meta and inject for safety
             for intent in all_intents:
+                daily_log["candidate_intents"].append({
+                    "ticker": intent.ticker,
+                    "direction": intent.direction.value,
+                    "conviction": intent.conviction.value,
+                    "reasons": [r.code for r in intent.reasons]
+                })
+                
                 if intent.ticker in latest_features and "latest_price" not in intent.meta:
                     intent.meta["latest_price"] = float(latest_features[intent.ticker].get("Close", 100))
                     intent.meta["atr_14"] = float(latest_features[intent.ticker].get("atr_14", 1.0))
@@ -116,13 +139,19 @@ def run_replay(
             # Formulate Action Plan
             plan = orchestrator.formulate_plan(all_intents, [alloc_intent], portfolio, risk_state)
             
+            for vetoed in plan.vetoed_intents:
+                daily_log["vetoed_intents"].append({
+                    "ticker": vetoed.ticker,
+                    "direction": vetoed.direction.value,
+                    "reason": vetoed.meta.get("veto_reason", "unknown")
+                })
+            
             # Execute Plan
             portfolio = broker.execute_plan(plan, portfolio)
             
             # Log Trades
             for order in plan.orders:
-                trade_log.append({
-                    "date": day_str,
+                order_dict = {
                     "order_id": order.order_id,
                     "ticker": order.ticker,
                     "direction": order.direction.value,
@@ -131,7 +160,13 @@ def run_replay(
                     "status": order.status.value,
                     "reason_codes": order.reason_codes,
                     "veto_reason": order.meta.get("veto_reason", "")
-                })
+                }
+                
+                daily_log["created_orders"].append(order_dict)
+                if order.status.value == "FILLED":
+                    daily_log["filled_orders"].append(order_dict)
+                    
+        trade_log.append(daily_log)
 
         # Record daily equity
         equity_curve.append({

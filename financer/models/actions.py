@@ -13,6 +13,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from .enums import Direction, EngineSource, OrderStatus
+from .intents import TradeIntent
 
 
 class Order(BaseModel):
@@ -36,5 +37,6 @@ class ActionPlan(BaseModel):
     plan_id: str = Field(default_factory=lambda: uuid4().hex[:12])
     orders: list[Order] = Field(default_factory=list)
     allocation_shifts: dict[str, float] = Field(default_factory=dict)
+    vetoed_intents: list[TradeIntent] = Field(default_factory=list)
     rationale: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
