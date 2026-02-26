@@ -5,12 +5,7 @@ from __future__ import annotations
 import pandas as pd
 from datetime import datetime
 
-from financer.execution.policy import (
-    STOP_LOSS_ATR_MULTIPLIER,
-    TRAILING_STOP_ATR_MULTIPLIER,
-    TP_TIERS_R,
-    TIME_STOP_DAYS,
-)
+from financer.execution import policy
 from financer.models.portfolio import PortfolioSnapshot, PositionState
 from financer.models.intents import TradeIntent, ReasonCode
 from financer.models.enums import Direction, Conviction, TimeHorizon, EngineSource
@@ -41,14 +36,14 @@ class PositionManager:
             
             # Simple Time Stop
             days_held = (current_date.date() - pos.opened_at.date()).days
-            if days_held > TIME_STOP_DAYS:
+            if days_held > policy.TIME_STOP_DAYS:
                 exit_intents.append(self._create_exit_intent(pos, curr_price, "TIME_STOP"))
                 continue
             
             # Evaluate Trailing Stop
             atr_14 = float(row.get("atr_14", 0.0))
             if atr_14 > 0:
-                trail_price = curr_price - (TRAILING_STOP_ATR_MULTIPLIER * atr_14)
+                trail_price = curr_price - (policy.TRAILING_STOP_ATR_MULTIPLIER * atr_14)
                 if pos.stop_loss is None or trail_price > pos.stop_loss:
                     trail_updates[pos.ticker] = trail_price  # Suggest new trail stop upwards
             
@@ -60,9 +55,9 @@ class PositionManager:
                 
             # Evaluate TP Tiers
             if atr_14 > 0:
-                risk_1r = STOP_LOSS_ATR_MULTIPLIER * atr_14
+                risk_1r = policy.STOP_LOSS_ATR_MULTIPLIER * atr_14
                 hit_tp = False
-                for tier_r in TP_TIERS_R:
+                for tier_r in policy.TP_TIERS_R:
                     target_price = pos.entry_price + (tier_r * risk_1r)
                     if curr_price >= target_price:
                         hit_tp = True

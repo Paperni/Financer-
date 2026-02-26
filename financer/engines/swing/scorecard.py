@@ -6,6 +6,9 @@ import pandas as pd
 
 from financer.models.intents import ReasonCode
 
+RSI_BAND_LOWER = 30
+RSI_BAND_UPPER = 45
+
 
 def score_setup(row: pd.Series) -> tuple[int, list[ReasonCode]]:
     """Score a potential entry from 0-8 based on institutional-style confirmations.
@@ -25,7 +28,7 @@ def score_setup(row: pd.Series) -> tuple[int, list[ReasonCode]]:
         # 2. RSI Pullback zone
         rsi = float(row.get("rsi_14", 50.0))
         if not pd.isna(rsi):
-            if 30 <= rsi <= 45:
+            if RSI_BAND_LOWER <= rsi <= RSI_BAND_UPPER:
                 score += 1
                 reasons.append(ReasonCode(code="RSI_PULLBACK", weight=1.0, detail=f"RSI {rsi:.1f} is in the sweet spot."))
             elif 25 <= rsi < 30:

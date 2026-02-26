@@ -28,9 +28,17 @@ def check_entry_readiness(row: pd.Series) -> bool:
 class SwingEngine:
     """The Swing Engine evaluates features to emit TradeIntents."""
 
-    def __init__(self, min_entry_score: float = 4.0, max_draft: int = 10):
+    def __init__(
+        self,
+        min_entry_score: float = 4.0,
+        max_draft: int = 10,
+        stop_loss_atr_mult: float = 1.5,
+        tp_atr_mult: float = 4.0
+    ):
         self.min_entry_score = min_entry_score
         self.max_draft = max_draft
+        self.stop_loss_atr_mult = stop_loss_atr_mult
+        self.tp_atr_mult = tp_atr_mult
 
     def evaluate(self, latest_features: dict[str, pd.Series]) -> list[TradeIntent]:
         """Evaluate the latest features for all universe tickers and emit intents."""
@@ -71,8 +79,8 @@ class SwingEngine:
                 atr_14 = float(row.get("atr_14", 0.0))
                 close_price = float(row.get("Close", 100.0))  # Provided by data bars, default 100
 
-                stop_price = close_price - (1.5 * atr_14) if atr_14 > 0 else None
-                target_price = close_price + (4.0 * atr_14) if atr_14 > 0 else None
+                stop_price = close_price - (self.stop_loss_atr_mult * atr_14) if atr_14 > 0 else None
+                target_price = close_price + (self.tp_atr_mult * atr_14) if atr_14 > 0 else None
 
                 intent = TradeIntent(
                     ticker=ticker,

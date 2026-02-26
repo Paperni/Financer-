@@ -24,33 +24,55 @@ def run_replay(
     start: str,
     end: str,
     initial_cash: float = 100_000.0,
-    min_entry_score: float = 4.0
+    min_entry_score: float = 4.0,
+    stop_loss_atr_mult: float = 1.5,
+    precomputed_features: dict[str, pd.DataFrame] | None = None,
+    precomputed_daily_features: dict[Any, dict[str, dict]] | None = None
 ):
     """Run a deterministic day-by-day replay simulation."""
     print(f"Loading features for {len(tickers)} tickers from {start} to {end}...")
     
     # 1. Load all features offline
     feature_dfs = {}
-    for ticker in tickers:
-        df = build_features(ticker, start=start, end=end)
-        if not df.empty:
-            feature_dfs[ticker] = df
+    if precomputed_features is not None:
+        feature_dfs = precomputed_features
+    else:
+        for ticker in tickers:
+            df = build_features(ticker, start=start, end=end)
+            if not df.empty:
+                feature_dfs[ticker] = df
 
-    if not feature_dfs:
+    if not feature_dfs and not precomputed_daily_features:
         print("No feature data loaded. Exiting.")
         return None
 
-    # Find the union of all trading days
-    all_dates = set()
-    for df in feature_dfs.values():
-        all_dates.update(df.index.normalize())
-    
-    trading_days = sorted(list(all_dates))
-    
+    # Transpose feature list for O(1) daily lookup
+    # Date -> Ticker -> Row
+    if precomputed_daily_features is not None:
+        daily_features = precomputed_daily_features
+    else:
+        print("Transposing features for rapid playback...")
+        daily_features = {}
+        for ticker, df in feature_dfs.items():
+            # iterrows is okay here since we only do it once, but to_dict('index') is faster
+            ticker_dict = df.to_dict('index')
+            for d, row_dict in ticker_dict.items():
+                if pd.isna(d): continue
+                
+                # Normalize timestamp to datetime if needed
+                ts = pd.to_datetime(d).normalize()
+                if ts not in daily_features:
+                    daily_features[ts] = {}
+                daily_features[ts][ticker] = row_dict
+                
+    trading_days = sorted(list(daily_features.keys()))
     print(f"Total trading days to replay: {len(trading_days)}")
 
     # 2. Boot up core components
-    engine = SwingEngine(min_entry_score=min_entry_score)
+    engine = SwingEngine(
+        min_entry_score=min_entry_score,
+        stop_loss_atr_mult=stop_loss_atr_mult
+    )
     orchestrator = CIOOrchestrator()
     broker = SimBroker()
     from financer.execution.position_manager import PositionManager
@@ -66,12 +88,8 @@ def run_replay(
     for current_day in trading_days:
         day_str = current_day.strftime("%Y-%m-%d")
         
-        # Build "latest" features row for the current day
-        latest_features = {}
-        for ticker, df in feature_dfs.items():
-            if current_day in df.index:
-                row = df.loc[current_day]
-                latest_features[ticker] = row
+        # O(1) lookup
+        latest_features = daily_features.get(current_day, {})
 
         if not latest_features:
             continue
