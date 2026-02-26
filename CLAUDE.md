@@ -106,6 +106,23 @@ reports/
 - `TERMINAL_GROWTH`: 0.025 (2.5%)
 - `RISK_FREE_RATE`: 0.043 (10-year Treasury)
 
+## Modularity (non-negotiable)
+
+- no circular imports
+- intent-only engines
+- orchestrator-only orders
+- pure position manager
+- policy injection (no global mutation)
+- provider swapping + no network in tests
+
+## Lessons Learned (Do Not Repeat)
+
+**Template:** Symptom / Root cause / Prevention rule / Guardrail test
+
+- Regime fail-open blocked new entries incorrectly / Fallback logic defaulted to open / Must fail-closed / fail-closed + test
+- Root junk artifacts / Output paths were unscoped / Enforce strict subdirectories / root guard test
+- Replay parity issues / State coupling in manager / Position manager purity / determinism hash test
+
 ### Notes
 
 - The downloader uses a placeholder email for SEC EDGAR API access (required by SEC)
