@@ -77,7 +77,7 @@ class SwingEngine:
                     conviction = Conviction.LOW
 
                 atr_14 = float(row.get("atr_14", 0.0))
-                close_price = float(row.get("Close", 100.0))  # Provided by data bars, default 100
+                close_price = float(row.get("close", 100.0))  # Provided by data bars, default 100
 
                 stop_price = close_price - (self.stop_loss_atr_mult * atr_14) if atr_14 > 0 else None
                 target_price = close_price + (self.tp_atr_mult * atr_14) if atr_14 > 0 else None

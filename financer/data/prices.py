@@ -7,8 +7,15 @@ callable for tests or alternative data sources.
 from __future__ import annotations
 
 from typing import Any, Callable
+import time
+import os
+from pathlib import Path
 
 import pandas as pd
+
+class DataFetchError(Exception):
+    """Raised when data fetching fails after retries, or data is malformed."""
+    pass
 
 
 # ── Column schema every consumer can rely on ────────────────────────────────
@@ -24,13 +31,24 @@ def _empty_bars() -> pd.DataFrame:
 
 
 def _default_provider(ticker: str, start: str, end: str, interval: str) -> pd.DataFrame:
-    """Fetch bars from yfinance.  Imported lazily to keep tests fast."""
+    """Fetch bars from yfinance with 3x retry and exponential backoff."""
     import yfinance as yf  # noqa: PLC0415
 
-    df = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
-    if df is None or df.empty:
-        return pd.DataFrame()
-    return df
+    max_retries = 3
+    base_delay = 2.0
+    
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
+            if df is None or df.empty:
+                raise DataFetchError(f"yfinance returned empty data for {ticker}")
+            return df
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise DataFetchError(f"Failed to fetch {ticker} after {max_retries} attempts. Last error: {str(e)}")
+            time.sleep(base_delay * (2 ** attempt))
+            
+    return pd.DataFrame()
 
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,32 +106,34 @@ def get_bars(
     timeframe: str = "1d",
     provider: Callable[..., pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
-    """Fetch and normalize OHLCV bars for a single ticker.
-
-    Parameters
-    ----------
-    ticker : str
-        Instrument symbol (e.g. "AAPL").
-    start, end : str
-        Date strings like "2025-11-01".
-    timeframe : str
-        Bar interval — "1d", "1h", "5m", etc.
-    provider : callable, optional
-        ``provider(ticker, start, end, interval) -> DataFrame``.
-        Defaults to yfinance.
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: open, high, low, close, volume.
-        Index: DatetimeIndex named ``timestamp``, tz-aware UTC.
-    """
+    """Fetch and normalize OHLCV bars for a single ticker with caching."""
+    # 1. Check Cache First
+    cache_dir = Path("artifacts/data_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{ticker}_{timeframe}_{start}_{end}.parquet"
+    
+    if cache_path.exists():
+        try:
+            return pd.read_parquet(cache_path)
+        except Exception:
+            pass # Fallback to fetch if cache is corrupted
+            
+    # 2. Fetch Data
     fetch = provider or _default_provider
     try:
         raw = fetch(ticker, start, end, timeframe)
-    except Exception:
-        return _empty_bars()
-    return _normalize(raw)
+    except DataFetchError:
+        raise
+    except Exception as e:
+        raise DataFetchError(f"Unexpected error fetching {ticker}: {str(e)}")
+        
+    df = _normalize(raw)
+    
+    # 3. Save to Cache Output
+    if not df.empty:
+        df.to_parquet(cache_path)
+        
+    return df
 
 
 def get_market_bars(

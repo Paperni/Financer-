@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from financer.data.prices import EXPECTED_COLUMNS, INDEX_NAME, get_bars, get_market_bars
+from financer.data.prices import EXPECTED_COLUMNS, INDEX_NAME, get_bars, get_market_bars, DataFetchError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -90,12 +90,11 @@ class TestGetBarsEmpty:
         assert df.index.name == INDEX_NAME
         assert len(df) == 0
 
-    def test_exception_provider_returns_empty(self):
+    def test_exception_provider_raises_error(self):
         def boom(t, s, e, i):
             raise RuntimeError("boom")
-        df = get_bars("FAKE", "2025-01-01", "2025-02-01", provider=boom)
-        assert len(df) == 0
-        assert list(df.columns) == EXPECTED_COLUMNS
+        with pytest.raises(DataFetchError, match="Unexpected error fetching FAKE: boom"):
+            get_bars("FAKE", "2025-01-01", "2025-02-01", provider=boom)
 
 
 class TestGetMarketBars:

@@ -97,7 +97,7 @@ def run_replay(
         # Engine now handles exits. We pass the portfolio.
         for pos in portfolio.positions:
             if pos.ticker in latest_features:
-                pos.current_price = float(latest_features[pos.ticker].get("Close", pos.current_price))
+                pos.current_price = float(latest_features[pos.ticker].get("close", pos.current_price))
 
         # Update RiskState (Daily mark-to-market)
         risk_op_pct = 0.0
@@ -151,7 +151,7 @@ def run_replay(
                 })
                 
                 if intent.ticker in latest_features and "latest_price" not in intent.meta:
-                    intent.meta["latest_price"] = float(latest_features[intent.ticker].get("Close", 100))
+                    intent.meta["latest_price"] = float(latest_features[intent.ticker].get("close", 100))
                     intent.meta["atr_14"] = float(latest_features[intent.ticker].get("atr_14", 1.0))
 
             # Formulate Action Plan
@@ -165,7 +165,7 @@ def run_replay(
                 })
             
             # Execute Plan
-            portfolio = broker.execute_plan(plan, portfolio)
+            portfolio = broker.execute_plan(plan, portfolio, current_date=current_day)
             
             # Log Trades
             for order in plan.orders:

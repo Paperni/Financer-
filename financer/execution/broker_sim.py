@@ -15,7 +15,8 @@ class SimBroker:
     def execute_plan(
         self,
         plan: ActionPlan,
-        portfolio: PortfolioSnapshot
+        portfolio: PortfolioSnapshot,
+        current_date: datetime | None = None
     ) -> PortfolioSnapshot:
         """Apply APPROVED orders from the plan to the portfolio."""
 
@@ -28,7 +29,7 @@ class SimBroker:
                 if portfolio.cash >= cost:
                     # Execute BUY
                     portfolio.cash -= cost
-                    now = datetime.now(timezone.utc)
+                    now = current_date if current_date is not None else datetime.now(timezone.utc)
                     new_pos = PositionState(
                         ticker=order.ticker,
                         qty=order.qty,

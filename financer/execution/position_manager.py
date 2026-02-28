@@ -32,7 +32,7 @@ class PositionManager:
                 continue
                 
             row = latest_features[pos.ticker]
-            curr_price = float(row.get("Close", pos.current_price))
+            curr_price = float(row.get("close", pos.current_price))
             
             # Simple Time Stop
             days_held = (current_date.date() - pos.opened_at.date()).days
