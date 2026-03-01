@@ -41,6 +41,7 @@ def position_size(
     equity: float,
     regime: Regime = Regime.RISK_ON,
     score: int = 5,
+    risk_per_trade_pct: float | None = None,
 ) -> dict[str, float | int | None]:
     """Compute position qty, stop-loss, and take-profit levels.
 
@@ -56,7 +57,7 @@ def position_size(
     # Clamp score to valid range
     score = max(5, min(8, score))
 
-    risk_pct = RISK_BY_SCORE[score]
+    risk_pct = risk_per_trade_pct if risk_per_trade_pct is not None else RISK_BY_SCORE[score]
     cap_pct = MAX_POSITION_BY_SCORE[score]
 
     # Stop distance

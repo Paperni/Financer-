@@ -1,0 +1,32 @@
+# Risk & Deployment Scaling Campaign (Swing Long-Only)
+# Target: Maximize Returns towards 20% while holding Max DD <= 15%
+id: "risk_scale_v1"
+
+# Inherit from swing_v1.yml universe
+universe:
+  use_broad_lists: true
+
+timeframe: "1d"
+start: "2021-01-01"
+end: "2025-12-31"
+
+# Performance filters for survivors
+gates:
+  min_trades: 60
+  max_dd_pct: 15.0
+  min_expectancy_R: 0.10
+
+# Baseline params (from Out-of-Sample winner Config C)
+sweep_grid:
+  score_threshold: [5]
+  stop_atr_mult: [1.75]
+  time_stop_bars: [50]
+  rsi_band:
+    - [35, 50]
+  
+  # The actual risk scaling grid
+  max_positions: [8, 12, 16]
+  risk_per_trade_pct: [0.005, 0.0075, 0.010]  # Decimal equivalents of 0.5%, 0.75%, 1.0%
+  max_heat_R: [3.0, 5.0, 7.0]
+  cautious_size_mult: [0.75, 1.0]
+  pyramiding_mode: ["off", "on"]

@@ -44,7 +44,7 @@ def test_swing_engine_emits_trade_intent():
         "earnings_within_7d": False,
         "roc_20": 0.15,
         "atr_14": 2.0,
-        "Close": 150.0
+        "close": 150.0
     })
 
     # Weak momentum and terrible setup
@@ -59,7 +59,7 @@ def test_swing_engine_emits_trade_intent():
         "earnings_within_7d": True,
         "roc_20": -0.10,
         "atr_14": 2.0,
-        "Close": 50.0
+        "close": 50.0
     })
 
     features = {

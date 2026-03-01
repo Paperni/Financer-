@@ -1,0 +1,31 @@
+name: "OOS 2025 Validation"
+id: "oos_2025_top3"
+
+universe:
+  use_broad_lists: true
+
+dates:
+  start: "2025-01-01"
+  end: "2025-12-31"
+
+exact_configs:
+  - score_threshold: 5
+    stop_atr_mult: 1.5
+    time_stop_bars: 30
+    rsi_band: [30, 45]
+    cautious_size_mult: 0.5
+  - score_threshold: 5
+    stop_atr_mult: 1.25
+    time_stop_bars: 30
+    rsi_band: [30, 45]
+    cautious_size_mult: 0.75
+  - score_threshold: 5
+    stop_atr_mult: 1.75
+    time_stop_bars: 50
+    rsi_band: [35, 50]
+    cautious_size_mult: 0.75
+
+gates:
+  min_trades: 20
+  max_dd_pct: 15.0
+  min_expectancy_R: 0.00

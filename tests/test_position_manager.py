@@ -16,7 +16,7 @@ def test_position_manager_time_stop():
     pm = PositionManager()
     
     # 20 days later
-    latest = {"AAPL": pd.Series({"Close": 95.0, "atr_14": 2.0})}
+    latest = {"AAPL": pd.Series({"close": 95.0, "atr_14": 2.0})}
     
     exits, trails = pm.evaluate_exits(port, latest, datetime(2025, 1, 25, tzinfo=timezone.utc))
     
@@ -38,7 +38,7 @@ def test_position_manager_trailing_stop_pure_mutation():
     # 1R = 1.5 * 2.0 = 3.0. TP1 = 100 + (2.0 * 3.0) = 106.
     # Current price = 104. Trail = 104 - (1.0 * 2.0) = 102.
     # 102 > original SL of 90, so it suggests trail update to 102.
-    latest = {"AAPL": pd.Series({"Close": 104.0, "atr_14": 2.0})}
+    latest = {"AAPL": pd.Series({"close": 104.0, "atr_14": 2.0})}
     
     exits, trails = pm.evaluate_exits(port, latest, datetime(2025, 1, 3, tzinfo=timezone.utc))
     

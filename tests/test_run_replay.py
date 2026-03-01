@@ -13,7 +13,7 @@ def test_golden_replay_deterministic_no_network(tmp_path):
     dates = pd.date_range(start="2025-01-01", periods=3, tz=timezone.utc)
     
     df_mock = pd.DataFrame({
-        "Close": [100.0, 105.0, 110.0],
+        "close": [100.0, 105.0, 110.0],
         "atr_14": [2.5, 2.5, 2.5],
         "sma_50": [90.0, 91.0, 92.0],
         "above_50": [True, True, True],
@@ -70,7 +70,7 @@ def test_golden_replay_multiticker_deterministic_hash(tmp_path):
     
     def make_synth(base_price):
         return pd.DataFrame({
-            "Close": [base_price + i for i in range(60)],
+            "close": [base_price + i for i in range(60)],
             "atr_14": [2.0] * 60,
             "sma_50": [base_price - 10] * 60,
             "above_50": [True] * 60,
@@ -114,7 +114,7 @@ def test_golden_replay_multiticker_deterministic_hash(tmp_path):
 def test_veto_unknown_regime():
     dates = pd.date_range("2025-01-01", periods=1, tz=timezone.utc)
     df = pd.DataFrame({
-        "Close": [100.0], "atr_14": [2.0], "sma_50": [90.0], "above_50": [True],
+        "close": [100.0], "atr_14": [2.0], "sma_50": [90.0], "above_50": [True],
         "regime": [float("nan")], # Unknown regime
         "rsi_14": [35.0], "macd_hist": [0.5], "rs_20": [1.1], "peg_proxy": [1.0],
         "earnings_within_7d": [False], "roc_20": [0.15]
@@ -128,7 +128,7 @@ def test_veto_unknown_regime():
 def test_veto_missing_columns():
     dates = pd.date_range("2025-01-01", periods=1, tz=timezone.utc)
     df = pd.DataFrame({
-        "Close": [100.0], "atr_14": [float("nan")], # Missing
+        "close": [100.0], "atr_14": [float("nan")], # Missing
         "sma_50": [90.0], "above_50": [True], "regime": ["RISK_ON"],
         "rsi_14": [35.0], "macd_hist": [0.5], "rs_20": [1.1], "peg_proxy": [1.0],
         "earnings_within_7d": [False], "roc_20": [0.15]
@@ -142,7 +142,7 @@ def test_veto_missing_columns():
 def test_veto_earnings_blackout():
     dates = pd.date_range("2025-01-01", periods=1, tz=timezone.utc)
     df = pd.DataFrame({
-        "Close": [100.0], "atr_14": [2.0], "sma_50": [90.0], "above_50": [True],
+        "close": [100.0], "atr_14": [2.0], "sma_50": [90.0], "above_50": [True],
         "regime": ["RISK_ON"], "rsi_14": [35.0], "macd_hist": [0.5], "rs_20": [1.1],
         "peg_proxy": [1.0], "earnings_within_7d": [True], # Blackout
         "roc_20": [0.15]
@@ -156,7 +156,7 @@ def test_veto_earnings_blackout():
 def test_integrity_no_multiple_buys():
     dates = pd.date_range("2025-01-01", periods=2, tz=timezone.utc)
     df = pd.DataFrame({
-        "Close": [100.0, 100.0], "atr_14": [2.0, 2.0], "sma_50": [90.0, 90.0],
+        "close": [100.0, 100.0], "atr_14": [2.0, 2.0], "sma_50": [90.0, 90.0],
         "above_50": [True, True], "regime": ["RISK_ON", "RISK_ON"],
         "rsi_14": [35.0, 35.0], "macd_hist": [0.5, 0.5], "rs_20": [1.1, 1.1],
         "peg_proxy": [1.0, 1.0], "earnings_within_7d": [False, False], "roc_20": [0.15, 0.15]

@@ -27,7 +27,12 @@ def run_replay(
     min_entry_score: float = 4.0,
     stop_loss_atr_mult: float = 1.5,
     precomputed_features: dict[str, pd.DataFrame] | None = None,
-    precomputed_daily_features: dict[Any, dict[str, dict]] | None = None
+    precomputed_daily_features: dict[Any, dict[str, dict]] | None = None,
+    max_positions: int = 20,
+    max_heat_R: float = 5.0,
+    pyramiding_mode: str = "off",
+    risk_per_trade_pct: float | None = None,
+    cautious_size_mult: float = 0.75
 ):
     """Run a deterministic day-by-day replay simulation."""
     print(f"Loading features for {len(tickers)} tickers from {start} to {end}...")
@@ -73,7 +78,17 @@ def run_replay(
         min_entry_score=min_entry_score,
         stop_loss_atr_mult=stop_loss_atr_mult
     )
-    orchestrator = CIOOrchestrator()
+    from financer.core.governor import RiskGovernor
+    governor = RiskGovernor(
+        max_positions=max_positions,
+        max_heat_R=max_heat_R,
+        pyramiding_mode=pyramiding_mode
+    )
+    orchestrator = CIOOrchestrator(
+        governor=governor,
+        cautious_size_mult=cautious_size_mult,
+        risk_per_trade_pct=risk_per_trade_pct
+    )
     broker = SimBroker()
     from financer.execution.position_manager import PositionManager
     pos_manager = PositionManager()

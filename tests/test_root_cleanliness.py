@@ -22,9 +22,11 @@ ALLOWED_ROOT_DIRS: set[str] = {
     "legacy",
     "historical_tester",
     "configs",
+    "campaigns",     # campaign YAML definitions
     "control_center",
     "tools",
     "artifacts",     # gitignored runtime cache/outputs
+    "data",          # data storage
 }
 
 ALLOWED_ROOT_FILES: set[str] = {

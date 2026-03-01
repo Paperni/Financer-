@@ -87,12 +87,12 @@ def write_leaderboard_csv(path, leaderboard):
     if not leaderboard:
         return
     # Flattens config and metrics
-    fieldnames = list(leaderboard[0]["config"].keys()) + list(leaderboard[0]["metrics"].keys()) + ["survived"]
+    fieldnames = list(leaderboard[0]["config"].keys()) + list(leaderboard[0]["metrics"].keys()) + ["survived", "meets_20pct_target"]
     with open(path, "w", newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for row in leaderboard:
-            out = {**row["config"], **row["metrics"], "survived": row.get("survived", False)}
+            out = {**row["config"], **row["metrics"], "survived": row.get("survived", False), "meets_20pct_target": row.get("meets_20pct_target", False)}
             writer.writerow(out)
 
 def write_leaderboard_md(path, survivors):
@@ -142,8 +142,12 @@ def run_campaign():
     else:
         tickers = universe_cfg.get("tickers", [])
         
-    start_date = cfg["dates"]["start"]
-    end_date = cfg["dates"]["end"]
+    if "dates" in cfg:
+        start_date = cfg["dates"]["start"]
+        end_date = cfg["dates"]["end"]
+    else:
+        start_date = cfg["start"]
+        end_date = cfg["end"]
     
     gates = cfg["gates"]
     
@@ -223,16 +227,24 @@ def run_campaign():
         
         # 2. Run simulation
         t0 = time.time()
-        result = run_replay(
-            tickers=list(feature_dfs.keys()),
-            start=start_date,
-            end=end_date,
-            initial_cash=100000.0,
-            min_entry_score=comb["score_threshold"],
-            stop_loss_atr_mult=comb["stop_atr_mult"],
-            precomputed_features=feature_dfs,
-            precomputed_daily_features=daily_features
-        )
+        # Build dynamic kwargs matching supported run_replay arguments
+        kwargs = {
+            "tickers": list(feature_dfs.keys()),
+            "start": start_date,
+            "end": end_date,
+            "initial_cash": 100000.0,
+            "precomputed_features": feature_dfs,
+            "precomputed_daily_features": daily_features,
+            "min_entry_score": comb.get("score_threshold", 5),
+            "stop_loss_atr_mult": comb.get("stop_atr_mult", 1.5),
+        }
+        
+        # Inject optional sweep grid parameters if defined
+        for optional_key in ["max_positions", "max_heat_R", "pyramiding_mode", "risk_per_trade_pct", "cautious_size_mult"]:
+            if optional_key in comb:
+                kwargs[optional_key] = comb[optional_key]
+                
+        result = run_replay(**kwargs)
         t1 = time.time()
         
         if not result:
@@ -249,7 +261,8 @@ def run_campaign():
         
         record = {
             "config": comb,
-            "metrics": metrics
+            "metrics": metrics,
+            "meets_20pct_target": bool(metrics["total_return_pct"] >= 20.0 and metrics["max_dd_pct"] <= 15.0)
         }
         
         leaderboard.append(record)

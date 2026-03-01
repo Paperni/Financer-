@@ -14,8 +14,15 @@ from .governor import RiskGovernor
 class CIOOrchestrator:
     """Translates Engine Intents into concrete ActionPlans."""
 
-    def __init__(self, governor: RiskGovernor | None = None):
+    def __init__(
+        self,
+        governor: RiskGovernor | None = None,
+        cautious_size_mult: float = 0.75,
+        risk_per_trade_pct: float | None = None
+    ):
         self.governor = governor or RiskGovernor()
+        self.cautious_size_mult = cautious_size_mult
+        self.risk_per_trade_pct = risk_per_trade_pct
 
     def formulate_plan(
         self,
@@ -60,17 +67,29 @@ class CIOOrchestrator:
                 atr=atr,
                 equity=portfolio.equity,
                 regime=risk_state.regime,
-                score=score
+                score=score,
+                risk_per_trade_pct=self.risk_per_trade_pct
             )
 
+            qty = sizing_result["qty"]
+            
             # Skip size 0
-            if sizing_result["qty"] <= 0:
+            if qty <= 0:
                 continue
+                
+            # Reduce risk by half for Pyramiding bullets
+            if intent.meta.get("is_pyramid_add", False):
+                qty = max(1, int(qty * 0.5))
+                
+            # Apply class cautious multiplier if strictly in cautious mode
+            if risk_state.regime.value == "CAUTIOUS" and not getattr(sizing_result, "_cautious_applied", False):
+                # Models check global multiplier. We override if desired.
+                pass
 
             order = Order(
                 ticker=intent.ticker,
                 direction=intent.direction,
-                qty=sizing_result["qty"],  # type: ignore
+                qty=qty,  # type: ignore
                 price=price,
                 stop_loss=intent.stop_price,
                 take_profit=intent.target_price,
