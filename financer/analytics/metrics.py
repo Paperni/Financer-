@@ -6,6 +6,30 @@ from typing import Any
 import pandas as pd
 
 
+def compute_max_drawdown_pct(equity_curve: list[dict[str, Any]]) -> float:
+    """Compute the strict running peak-to-trough drawdown from the raw equity points."""
+    if not equity_curve:
+        return 0.0
+        
+    running_peak = 0.0
+    max_dd = 0.0
+    
+    for pt in equity_curve:
+        equity = pt.get("equity")
+        if equity is None:
+            continue
+            
+        if equity > running_peak:
+            running_peak = equity
+            
+        if running_peak > 0:
+            dd = (running_peak - equity) / running_peak
+            if dd > max_dd:
+                max_dd = dd
+                
+    return max_dd * 100.0
+
+
 def compute_portfolio_metrics(equity_curve_path: str | None, ledger: pd.DataFrame) -> dict[str, Any]:
     """Calculate aggregate portfolio behavior."""
     metrics = {

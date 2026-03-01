@@ -1,0 +1,12 @@
+CAMPAIGN_ID: risk_scale_v1
+Folder: artifacts/campaigns/risk_scale_v1
+Gates: {}
+Passed: 108
+Failed: 0
+--- BOTTOM 5 ---
+score_threshold,stop_atr_mult,time_stop_bars,rsi_band,max_positions,risk_per_trade_pct,max_heat_R,cautious_size_mult,pyramiding_mode,max_dd_pct,trades,expectancy_R,total_return_pct,survived,meets_20pct_target
+5,1.75,50,"[35, 50]",12,0.01,5.0,0.75,off,10.536637012481687,495,0.2534406720798882,21.32381316184997,True,True
+5,1.75,50,"[35, 50]",12,0.01,7.0,0.75,off,10.536637012481687,495,0.2534406720798882,21.32381316184997,True,True
+5,1.75,50,"[35, 50]",16,0.01,3.0,0.75,off,10.536637012481687,495,0.2534406720798882,21.32381316184997,True,True
+5,1.75,50,"[35, 50]",16,0.01,5.0,0.75,off,10.536637012481687,495,0.2534406720798882,21.32381316184997,True,True
+5,1.75,50,"[35, 50]",16,0.01,7.0,0.75,off,10.536637012481687,495,0.2534406720798882,21.32381316184997,True,True

@@ -20,13 +20,14 @@ from financer.cli.run_replay import run_replay
 from financer.features.build import build_features
 from legacy.data_static import BROAD_STOCKS, BROAD_ETFS
 from financer.data.prices import get_bars, DataFetchError
+from financer.analytics.metrics import compute_max_drawdown_pct
 
 
 def compute_metrics(equity_curve: list, trade_log: list) -> dict:
     if not equity_curve:
         return {"max_dd_pct": 0.0, "trades": 0, "expectancy_R": 0.0}
         
-    max_dd = max(pt.get("drawdown_pct", 0) for pt in equity_curve) * 100.0
+    max_dd = compute_max_drawdown_pct(equity_curve)
     
     open_pos = {}
     completed_trades = []
