@@ -61,6 +61,19 @@ flowchart TD
 | Model | Module | Purpose |
 |-------|--------|---------|
 | `TradeIntent` | `intents.py` | Engine recommendation (ticker, direction, conviction, reasons) |
+
+### Intelligence schemas (`financer/intelligence/`)
+
+| Model | Module | Purpose |
+|-------|--------|---------|
+| `ControlPlan` | `models.py` | Top-level object containing environmental state and resulting policy constraints. |
+| `MarketState` | `models.py` | Nested sub-model tracking Regime and NLP scores. |
+| `PolicyOverrides` | `models.py` | Nested sub-model dictating Execution boundaries (e.g. `max_positions`). |
+
+**Intelligence Rules (Non-negotiable)**
+- **Controls Risk, Not Alpha:** The intelligence layer may throttle capital deployed (via scaling or lowering positions to 0), but does not execute new isolated positions.
+- **Data Only:** `ControlPlan` is read-only. It mutates absolutely nothing.
+- **Placeholder Nullification:** Future intelligence variables (e.g., NLP Event Risk, Sentiment Scoring) must remain strictly `Optional[None]` typed until actively wired into the orchestrator. Downstream interfaces must safely parse empty values.
 | `AllocationIntent` | `intents.py` | Engine desired portfolio split |
 | `ReasonCode` | `intents.py` | Explainable reason attached to any intent |
 | `Order` | `actions.py` | Concrete sized order (CIO output) |

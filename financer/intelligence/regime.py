@@ -19,7 +19,7 @@ import pandas as pd
 from financer.models.enums import Regime
 
 from .config import IntelligenceConfig, RegimeConfig, RegimeParamsConfig
-from .models import ControlPlan, neutral_plan
+from .models import ControlPlan, MarketState, PolicyOverrides, neutral_plan
 
 logger = logging.getLogger(__name__)
 
@@ -245,13 +245,19 @@ def classify_regime_at_date(
         f"(composite={composite:+.1f})"
     )
 
-    return ControlPlan(
-        as_of=dt.to_pydatetime(),
+    state = MarketState(
         regime=regime,
         regime_score=composite,
         regime_confidence=min(confidence, 1.0),
+        narrative=narrative,
+        computed_at=dt.to_pydatetime(),
+        source="intelligence.regime_classifier"
+    )
+    
+    policy = PolicyOverrides(
         max_positions=trading_params["max_positions"],
         position_size_multiplier=trading_params["position_size_multiplier"],
-        scorecard_threshold=trading_params["scorecard_threshold"],
-        narrative=narrative,
+        scorecard_threshold=trading_params["scorecard_threshold"]
     )
+
+    return ControlPlan(state=state, policy=policy)
