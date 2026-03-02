@@ -16,7 +16,7 @@ from financer.execution.broker_sim import SimBroker
 from financer.models.portfolio import PortfolioSnapshot
 from financer.models.risk import RiskState
 from financer.models.enums import Regime, Direction, Conviction, TimeHorizon
-from financer.models.intents import TradeIntent, EngineSource
+from financer.models.intents import ReasonCode, TradeIntent, EngineSource
 
 
 def run_replay(
@@ -32,7 +32,8 @@ def run_replay(
     max_heat_R: float = 5.0,
     pyramiding_mode: str = "off",
     risk_per_trade_pct: float | None = None,
-    cautious_size_mult: float = 0.75
+    cautious_size_mult: float = 0.75,
+    intelligence_enabled: bool = False,
 ):
     """Run a deterministic day-by-day replay simulation."""
     print(f"Loading features for {len(tickers)} tickers from {start} to {end}...")
@@ -95,7 +96,16 @@ def run_replay(
     
     portfolio = PortfolioSnapshot(cash=initial_cash, positions=[])
     risk_state = RiskState(regime=Regime.RISK_ON, open_risk_pct=0.0)
-    
+
+    # Intelligence engine setup (lazy imports to keep MIE optional)
+    intel_config = None
+    regime_smoothing = None
+    if intelligence_enabled:
+        from financer.intelligence.config import load_config as load_intel_config
+        from financer.intelligence.regime import _RegimeSmoothing
+        intel_config = load_intel_config()
+        regime_smoothing = _RegimeSmoothing(intel_config.regime.confirmation_days)
+
     equity_curve = []
     trade_log = []
 
@@ -133,17 +143,49 @@ def run_replay(
                 regime_val = Regime.RISK_ON
         risk_state.regime = regime_val
 
+        # Generate ControlPlan from intelligence if enabled
+        control_plan = None
+        if intelligence_enabled and intel_config is not None:
+            from financer.intelligence.regime import classify_regime_at_date
+            spy_df = feature_dfs.get("SPY")
+            if spy_df is not None:
+                control_plan = classify_regime_at_date(
+                    spy_df, current_day, intel_config, smoothing=regime_smoothing,
+                )
+                # Override engine score threshold for this cycle
+                engine.min_entry_score = control_plan.scorecard_threshold
+            else:
+                engine.min_entry_score = min_entry_score
+        else:
+            engine.min_entry_score = min_entry_score
+
         # Get Intents from Swing Engine
         alloc_intent = determine_allocation(risk_state.regime)
         trade_intents = engine.evaluate(latest_features)
-        
+
         exit_intents, trail_updates = pos_manager.evaluate_exits(portfolio, latest_features, current_day)
-        
+
         # Apply pure trail updates mutations safely here
         for pos in portfolio.positions:
             if pos.ticker in trail_updates:
                 pos.stop_loss = trail_updates[pos.ticker]
-        
+
+        # RISK_OFF emergency exits: ControlPlan says zero exposure
+        if control_plan is not None and control_plan.max_positions == 0:
+            exited_tickers = {ei.ticker for ei in exit_intents}
+            for pos in portfolio.positions:
+                if pos.ticker not in exited_tickers:
+                    curr = float(latest_features.get(pos.ticker, {}).get("close", pos.current_price))
+                    exit_intents.append(TradeIntent(
+                        ticker=pos.ticker,
+                        direction=Direction.SELL,
+                        conviction=Conviction.HIGH,
+                        time_horizon=TimeHorizon.SWING,
+                        source=EngineSource.SWING,
+                        reasons=[ReasonCode(code="REGIME_EXIT", detail="RISK_OFF regime exit")],
+                        meta={"latest_price": curr},
+                    ))
+
         all_intents = trade_intents + exit_intents
         
         daily_log = {
@@ -170,7 +212,7 @@ def run_replay(
                     intent.meta["atr_14"] = float(latest_features[intent.ticker].get("atr_14", 1.0))
 
             # Formulate Action Plan
-            plan = orchestrator.formulate_plan(all_intents, [alloc_intent], portfolio, risk_state)
+            plan = orchestrator.formulate_plan(all_intents, [alloc_intent], portfolio, risk_state, control_plan=control_plan)
             
             for vetoed in plan.vetoed_intents:
                 daily_log["vetoed_intents"].append({

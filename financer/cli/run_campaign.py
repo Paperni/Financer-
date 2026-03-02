@@ -241,7 +241,7 @@ def run_campaign():
         }
         
         # Inject optional sweep grid parameters if defined
-        for optional_key in ["max_positions", "max_heat_R", "pyramiding_mode", "risk_per_trade_pct", "cautious_size_mult"]:
+        for optional_key in ["max_positions", "max_heat_R", "pyramiding_mode", "risk_per_trade_pct", "cautious_size_mult", "intelligence_enabled"]:
             if optional_key in comb:
                 kwargs[optional_key] = comb[optional_key]
                 

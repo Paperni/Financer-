@@ -74,10 +74,13 @@ class RiskGovernor:
         return approved, vetoed
 
     def evaluate_order(
-        self, order: Order, state: RiskState, portfolio: PortfolioSnapshot | None = None
+        self, order: Order, state: RiskState, portfolio: PortfolioSnapshot | None = None,
+        control_plan: object | None = None,
     ) -> tuple[Order, RiskVeto]:
         """Check an order against current risk parameters.
-        
+
+        If *control_plan* is provided, its ``max_positions`` overrides the
+        governor's static limit for this evaluation only.
         If vetoed, the Order status is mutated to VETOED.
         """
         # Exits are always allowed
@@ -102,10 +105,13 @@ class RiskGovernor:
         checks_passed = []
         checks_failed = []
 
-        # 1. Max Positions
+        # 1. Max Positions (ControlPlan can only restrict, never expand)
+        effective_max = self.max_positions
+        if control_plan is not None and hasattr(control_plan, "max_positions"):
+            effective_max = min(self.max_positions, control_plan.max_positions)
         current_pos_count = len(portfolio.positions) if portfolio else 0
-        if current_pos_count >= self.max_positions:
-            checks_failed.append(f"max_positions_reached: {current_pos_count} >= {self.max_positions}")
+        if current_pos_count >= effective_max:
+            checks_failed.append(f"max_positions_reached: {current_pos_count} >= {effective_max}")
         else:
             checks_passed.append("max_positions_ok")
 

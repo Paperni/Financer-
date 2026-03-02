@@ -1,0 +1,54 @@
+intelligence:
+  enabled: true
+
+regime:
+  spy_ticker: "SPY"
+  sma_long: 200
+  sma_short: 50
+  slope_lookback: 10
+  breadth_sma_period: 50
+  breadth_bullish: 0.65
+  breadth_bearish: 0.40
+  vix_ticker: "^VIX"
+  vix_normal_low: 18.0
+  vix_normal_high: 25.0
+  vix_crisis: 35.0
+  risk_on_threshold: 2.0
+  risk_off_threshold: 0.0
+  confirmation_days: 2
+  sma200_slope_lookback: 20
+  sma200_slope_threshold: 0.0
+  atr_vol_threshold: 0.03
+
+regime_params:
+  risk_on_max_positions: 16
+  risk_on_size_mult: 1.0
+  risk_on_threshold: 5.0
+  cautious_max_positions: 4
+  cautious_size_mult: 0.50
+  cautious_threshold: 6.0
+  risk_off_max_positions: 0
+  risk_off_size_mult: 0.0
+  risk_off_threshold: 99.0
+
+rotation:
+  weight_1m: 0.40
+  weight_3m: 0.35
+  weight_6m: 0.25
+  overweight_count: 3
+  underweight_count: 4
+  benchmark_ticker: "SPY"
+
+conviction:
+  base_risk_pct: 0.01
+  max_multiplier: 2.0
+  min_multiplier: 0.25
+  tier1_bonus: 0.25
+  tier3_penalty: -0.25
+  score6_bonus: 0.25
+  top_rs_bonus: 0.25
+  top_rs_percentile: 0.20
+
+events:
+  high_impact_buffer_hours: 24
+  caution_buffer_hours: 48

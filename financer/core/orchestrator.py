@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from financer.models.actions import ActionPlan, Order
+from financer.models.enums import Direction
 from financer.models.intents import AllocationIntent, TradeIntent
 from financer.models.portfolio import PortfolioSnapshot
 from financer.models.risk import RiskState
@@ -29,9 +30,14 @@ class CIOOrchestrator:
         trade_intents: list[TradeIntent],
         allocation_intents: list[AllocationIntent],
         portfolio: PortfolioSnapshot,
-        risk_state: RiskState
+        risk_state: RiskState,
+        control_plan: object | None = None,
     ) -> ActionPlan:
-        """Merge all intents into a single executable ActionPlan."""
+        """Merge all intents into a single executable ActionPlan.
+
+        If *control_plan* is provided, its ``position_size_multiplier`` scales
+        qty and its ``max_positions`` is forwarded to the risk governor.
+        """
         plan = ActionPlan(rationale="CIO formulation based on incoming intents.")
 
         # Process allocations
@@ -72,7 +78,13 @@ class CIOOrchestrator:
             )
 
             qty = sizing_result["qty"]
-            
+
+            # Apply ControlPlan position_size_multiplier to entries only
+            if (control_plan is not None
+                    and hasattr(control_plan, "position_size_multiplier")
+                    and intent.direction == Direction.BUY):
+                qty = max(0, int(qty * control_plan.position_size_multiplier))
+
             # Skip size 0
             if qty <= 0:
                 continue
@@ -98,7 +110,7 @@ class CIOOrchestrator:
             )
 
             # 2. Ask Risk Governor for veto/approval
-            order, veto = self.governor.evaluate_order(order, risk_state, portfolio)
+            order, veto = self.governor.evaluate_order(order, risk_state, portfolio, control_plan=control_plan)
             if veto.vetoed:
                 order.meta["veto_reason"] = veto.reason
 
