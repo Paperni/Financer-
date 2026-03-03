@@ -42,6 +42,9 @@ class RegimeConfig:
     sma200_slope_lookback: int = 20
     sma200_slope_threshold: float = 0.0
     atr_vol_threshold: float = 0.03
+    vol_shock_lookback: int = 5
+    vol_shock_cautious_threshold: float = 0.035
+    vol_shock_risk_off_threshold: float = 0.045
 
 
 @dataclass(frozen=True)

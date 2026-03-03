@@ -232,6 +232,21 @@ def classify_regime_at_date(
     composite = sig_structure + sig_slope + sig_vol
     raw_regime = _composite_to_regime(composite)
 
+    shock_narrative = ""
+    # Signal 4: Trailing Volatility Shock Override
+    if len(sliced) > 0:
+        lookback_slice = sliced.iloc[-regime_cfg.vol_shock_lookback:]
+        # Compute daily ATR%
+        atr_pct_series = lookback_slice["atr_14"] / lookback_slice["close"]
+        vol_shock = atr_pct_series.max()
+        
+        if vol_shock > regime_cfg.vol_shock_risk_off_threshold:
+            raw_regime = Regime.RISK_OFF
+            shock_narrative = f" [SHOCK: RISK_OFF (max_atr={vol_shock:.1%})]"
+        elif vol_shock > regime_cfg.vol_shock_cautious_threshold:
+            raw_regime = Regime.CAUTIOUS
+            shock_narrative = f" [SHOCK: CAUTIOUS (max_atr={vol_shock:.1%})]"
+
     # Apply smoothing if provided
     regime = smoothing.update(raw_regime) if smoothing else raw_regime
 
@@ -242,7 +257,7 @@ def classify_regime_at_date(
     narrative = (
         f"Regime {regime.value}: structure={sig_structure:+.0f}, "
         f"slope={sig_slope:+.0f}, vol={sig_vol:+.0f} "
-        f"(composite={composite:+.1f})"
+        f"(composite={composite:+.1f}){shock_narrative}"
     )
 
     state = MarketState(

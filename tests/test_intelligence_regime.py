@@ -161,8 +161,10 @@ class TestClassifyRegimeAtDate:
         assert plan.regime == Regime.CAUTIOUS
 
     def test_high_atr_pct_degrades(self):
-        # Above both SMAs but extremely high vol -> structure=+1, slope=+1, vol=-1 -> composite=+1 -> CAUTIOUS
-        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=20.0,
+        # Above both SMAs but high vol (atr=15, close=450 -> 3.3%), which is above the 3.0%
+        # degradation threshold, but below the 3.5% shock override threshold.
+        # structure=+1, slope=+1, vol=-1 -> composite=+1 -> CAUTIOUS
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=15.0,
                            sma200_trend=0.05)
         cfg = _default_config()
         date = spy.index[-1]
@@ -261,6 +263,26 @@ class TestClassifyRegimeAtDate:
         assert plan.regime == Regime.RISK_OFF
         assert plan.max_positions == 0  # Blocks new entries
         assert not getattr(plan, 'crash_flag', False)  # Allows exits/stops without auto-flatten
+
+    def test_vol_shock_cautious_override(self):
+        # Strong bull trend (RISK_ON composite), but sudden volatility spike
+        # atr=20, close=450 -> 4.4%, which is > 3.5% (cautious shock) but < 4.5% (risk off shock)
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=20.0,
+                           sma200_trend=0.05)
+        cfg = _default_config()
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg)
+        assert plan.regime == Regime.CAUTIOUS
+        assert "SHOCK: CAUTIOUS" in plan.narrative
+
+    def test_vol_shock_risk_off_override(self):
+        # Strong bull trend (RISK_ON composite), but extreme crash
+        # atr=25, close=450 -> 5.5%, which is > 4.5% (risk off shock)
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=25.0,
+                           sma200_trend=0.05)
+        cfg = _default_config()
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg)
+        assert plan.regime == Regime.RISK_OFF
+        assert "SHOCK: RISK_OFF" in plan.narrative
 
 
 # ── Smoothing ────────────────────────────────────────────────────────────────
