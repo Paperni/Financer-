@@ -305,6 +305,7 @@ def run_walk_forward(
     step_months: int = 6,
     wf_id: str | None = None,
     replay_fn=None,
+    tickers: list[str] | None = None,
 ) -> Path:
     """Run walk-forward A/B evaluation.
 
@@ -343,21 +344,24 @@ def run_walk_forward(
 
     # Pre-compute features for the full range
     print(f"Loading universe and building features for {overall_start} to {overall_end}...")
-    tickers = list(dict.fromkeys(BROAD_STOCKS + BROAD_ETFS))
-
-    # Preflight: filter active tickers
-    end_dt = pd.to_datetime(overall_end)
-    preflight_start = (end_dt - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    active_tickers = []
-    for ticker in tickers:
-        try:
-            bars = get_bars(ticker, start=preflight_start, end=overall_end)
-            if not bars.empty:
-                active_tickers.append(ticker)
-        except DataFetchError:
-            pass
-    tickers = active_tickers
-    print(f"Active tickers: {len(tickers)}")
+    if tickers is not None:
+        # Explicit override — skip preflight, trust caller
+        print(f"Using explicit ticker list: {len(tickers)} tickers")
+    else:
+        tickers = list(dict.fromkeys(BROAD_STOCKS + BROAD_ETFS))
+        # Preflight: filter active tickers
+        end_dt = pd.to_datetime(overall_end)
+        preflight_start = (end_dt - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+        active_tickers = []
+        for ticker in tickers:
+            try:
+                bars = get_bars(ticker, start=preflight_start, end=overall_end)
+                if not bars.empty:
+                    active_tickers.append(ticker)
+            except DataFetchError:
+                pass
+        tickers = active_tickers
+        print(f"Active tickers: {len(tickers)}")
 
     feature_dfs: dict[str, pd.DataFrame] = {}
     for i, ticker in enumerate(tickers, 1):
@@ -465,14 +469,53 @@ if __name__ == "__main__":
     parser.add_argument("--train-months", type=int, default=24)
     parser.add_argument("--test-months", type=int, default=6)
     parser.add_argument("--step-months", type=int, default=6)
+    parser.add_argument(
+        "--tickers",
+        default=None,
+        help="Comma-separated ticker list; overrides universe (skips preflight fetch).",
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Preset: 2024-2025, 12mo train, 3mo test/step, top_n=3. Overridden by explicit flags.",
+    )
     args = parser.parse_args()
+
+    # Apply smoke preset defaults first; explicit flags override them
+    start = args.start
+    end = args.end
+    train_months = args.train_months
+    test_months = args.test_months
+    step_months = args.step_months
+    top_n = args.top_n
+
+    if args.smoke:
+        # Only apply smoke defaults where the user didn't provide an explicit value
+        # (argparse doesn't easily distinguish "user set" vs "default", so we check
+        #  against the parser defaults)
+        defaults = parser.parse_args([])  # empty args → all defaults
+        if start == defaults.start:
+            start = "2024-01-01"
+        if end == defaults.end:
+            end = "2025-12-31"
+        if train_months == defaults.train_months:
+            train_months = 12
+        if test_months == defaults.test_months:
+            test_months = 3
+        if step_months == defaults.step_months:
+            step_months = 3
+        if top_n == defaults.top_n:
+            top_n = 3
+
+    ticker_list = [t.strip() for t in args.tickers.split(",")] if args.tickers else None
 
     run_walk_forward(
         leaderboard_path=args.leaderboard,
-        top_n=args.top_n,
-        overall_start=args.start,
-        overall_end=args.end,
-        train_months=args.train_months,
-        test_months=args.test_months,
-        step_months=args.step_months,
+        top_n=top_n,
+        overall_start=start,
+        overall_end=end,
+        train_months=train_months,
+        test_months=test_months,
+        step_months=step_months,
+        tickers=ticker_list,
     )
