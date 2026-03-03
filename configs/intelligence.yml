@@ -3,6 +3,7 @@ intelligence:
 
 regime:
   spy_ticker: "SPY"
+  qqq_confirm: false
   sma_long: 200
   sma_short: 50
   slope_lookback: 10

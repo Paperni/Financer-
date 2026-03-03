@@ -15,24 +15,52 @@ FALLBACK_STOP_PCT: float = 0.05
 SLIPPAGE_PCT: float = 0.0005
 CAUTIOUS_SIZE_MULT: float = 0.75
 
-RISK_BY_SCORE: dict[int, float] = {
-    5: 0.010,   # 1.0% equity at risk
-    6: 0.015,   # 1.5%
-    7: 0.020,   # 2.0%
-    8: 0.025,   # 2.5%
-}
-
-MAX_POSITION_BY_SCORE: dict[int, float] = {
-    5: 0.05,    # 5% of equity max notional
-    6: 0.07,    # 7%
-    7: 0.085,   # 8.5%
-    8: 0.10,    # 10%
-}
+# ── Volatility & Kelly Parameters ───────────────────────────────────────────
+TARGET_ANNUAL_VOL: float = 0.15      # 15% target annualized portfolio volatility
+KELLY_MULTIPLIER: float = 0.25       # Quarter-Kelly scaling
+MAX_NOTIONAL_PCT: float = 0.10       # 10% max notional cap per position
 
 # ── TP multipliers (relative to ATR_STOP_MULTIPLIER) ────────────────────────
 _TP1_RATIO: float = 2.0 / 1.5   # ~1.333
 _TP2_RATIO: float = 3.0 / 1.5   # 2.0
 _TP3_RATIO: float = 4.0 / 1.5   # ~2.667
+
+
+class VolatilityTargetingSizer:
+    """Calculates position size using inverse volatility and Quarter-Kelly scaling."""
+
+    def __init__(
+        self,
+        target_annual_vol: float = TARGET_ANNUAL_VOL,
+        kelly_fraction: float = KELLY_MULTIPLIER,
+        max_notional_pct: float = MAX_NOTIONAL_PCT,
+    ):
+        self.target_annual_vol = target_annual_vol
+        self.kelly_fraction = kelly_fraction
+        self.max_notional_pct = max_notional_pct
+
+    def calculate_qty(
+        self, 
+        price: float, 
+        equity: float, 
+        annualized_vol: float,
+    ) -> int:
+        """Compute quantity based on target vol and kelly fraction."""
+        if price <= 0 or equity <= 0 or annualized_vol <= 0:
+            return 0
+            
+        raw_weight = self.target_annual_vol / annualized_vol
+        final_weight = min(raw_weight * self.kelly_fraction, self.max_notional_pct)
+        target_notional = equity * final_weight
+        qty = int(target_notional / price)
+        
+        return max(0, qty)
+
+    def calculate_weight(self, asset_annual_vol: float) -> float:
+        """Calculates theoretical portfolio weight."""
+        if asset_annual_vol <= 0:
+            return 0.0
+        return min((self.target_annual_vol / asset_annual_vol) * self.kelly_fraction, self.max_notional_pct)
 
 
 def position_size(
@@ -41,12 +69,12 @@ def position_size(
     equity: float,
     regime: Regime = Regime.RISK_ON,
     score: int = 5,
-    risk_per_trade_pct: float | None = None,
+    annualized_vol: float | None = None,
 ) -> dict[str, float | int | None]:
     """Compute position qty, stop-loss, and take-profit levels.
 
-    Returns a dict with keys:
-        qty, sl, tp1, tp2, tp3, risk_per_share, atr_used
+    If *annualized_vol* is provided, uses VolatilityTargetingSizer.
+    Otherwise, defaults to a minimal 1% fallback risk.
     """
     if price <= 0 or equity <= 0:
         return {
@@ -54,27 +82,25 @@ def position_size(
             "risk_per_share": 0.0, "atr_used": atr,
         }
 
-    # Clamp score to valid range
-    score = max(5, min(8, score))
-
-    risk_pct = risk_per_trade_pct if risk_per_trade_pct is not None else RISK_BY_SCORE[score]
-    cap_pct = MAX_POSITION_BY_SCORE[score]
-
     # Stop distance
     if atr and atr > 0:
         stop_distance = atr * ATR_STOP_MULTIPLIER
     else:
         stop_distance = price * FALLBACK_STOP_PCT
 
-    # Qty by risk budget vs qty by notional cap — take the smaller
-    risk_budget = equity * risk_pct
-    qty_by_risk = int(risk_budget / stop_distance) if stop_distance > 0 else 0
-    qty_by_cap = int((equity * cap_pct) / price)
-    qty = max(1, min(qty_by_risk, qty_by_cap))
+    # Sizing Logic
+    if annualized_vol is not None and annualized_vol > 0:
+        sizer = VolatilityTargetingSizer()
+        qty = sizer.calculate_qty(price, equity, annualized_vol)
+    else:
+        # Emergency fallback / Deprecated path
+        risk_budget = equity * 0.01
+        qty = int(risk_budget / stop_distance) if stop_distance > 0 else 0
+        qty = min(qty, int((equity * MAX_NOTIONAL_PCT) / price))
 
     # Regime adjustment
     if regime == Regime.CAUTIOUS:
-        qty = max(1, int(qty * CAUTIOUS_SIZE_MULT))
+        qty = max(0, int(qty * CAUTIOUS_SIZE_MULT))
     elif regime == Regime.RISK_OFF:
         qty = 0
 

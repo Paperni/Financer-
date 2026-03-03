@@ -34,6 +34,7 @@ def run_replay(
     risk_per_trade_pct: float | None = None,
     cautious_size_mult: float = 0.75,
     intelligence_enabled: bool = False,
+    intelligence_config=None,
 ):
     """Run a deterministic day-by-day replay simulation."""
     print(f"Loading features for {len(tickers)} tickers from {start} to {end}...")
@@ -110,8 +111,8 @@ def run_replay(
     if intelligence_enabled:
         from financer.intelligence.config import load_config as load_intel_config
         from financer.intelligence.regime import _RegimeSmoothing
-        intel_config = load_intel_config()
-        regime_smoothing = _RegimeSmoothing(intel_config.regime.confirmation_days)
+        intel_config = intelligence_config if intelligence_config is not None else load_intel_config()
+        regime_smoothing = _RegimeSmoothing()
 
     equity_curve = []
     trade_log = []
@@ -169,10 +170,20 @@ def run_replay(
             if spy_df is None and precomputed_features is not None:
                 spy_df = precomputed_features.get("SPY")
                 
+            qqq_df = feature_dfs.get("QQQ")
+            if qqq_df is None and precomputed_features is not None:
+                qqq_df = precomputed_features.get("QQQ")
+                
             if spy_df is not None:
                 control_plan = classify_regime_at_date(
-                    spy_df, current_day, intel_config, smoothing=regime_smoothing,
+                    spy_df, current_day, intel_config, smoothing=regime_smoothing, qqq_df=qqq_df
                 )
+                
+                # Track regime flips
+                if previous_plan_regime is not None and control_plan.state.regime != previous_plan_regime:
+                    mie_attribution["regime_flips"] += 1
+                previous_plan_regime = control_plan.state.regime
+                
                 if control_plan.policy.allow_entries:
                     # Override engine score threshold for this cycle
                     engine.min_entry_score = control_plan.scorecard_threshold
@@ -287,7 +298,8 @@ def run_replay(
             "equity": portfolio.equity,
             "cash": portfolio.cash,
             "drawdown_pct": portfolio.drawdown_pct,
-            "utilization_pct": 1.0 - (portfolio.cash / portfolio.equity)
+            "utilization_pct": 1.0 - (portfolio.cash / portfolio.equity),
+            "regime": risk_state.regime.value if risk_state.regime else "RISK_ON",
         })
 
     # Save outputs
@@ -302,7 +314,7 @@ def run_replay(
     return portfolio, equity_curve, trade_log, mie_attribution
 
 
-def save_artifacts(equity_curve, trade_log, output_dir: str = "artifacts"):
+def save_artifacts(equity_curve, trade_log, mie_attribution=None, output_dir: str = "artifacts"):
     """Helper to save artifacts."""
     import os
     os.makedirs(output_dir, exist_ok=True)
@@ -312,13 +324,17 @@ def save_artifacts(equity_curve, trade_log, output_dir: str = "artifacts"):
         
     with open(f"{output_dir}/replay_trades.json", "w") as f:
         json.dump(trade_log, f, indent=2)
+        
+    if mie_attribution:
+        with open(f"{output_dir}/mie_attribution.json", "w") as f:
+            json.dump(mie_attribution, f, indent=2)
 
 
 if __name__ == "__main__":
-    portfolio, curve, trades, _ = run_replay(
+    portfolio, curve, trades, mie_attr = run_replay(
         tickers=["AAPL", "MSFT", "GOOGL", "SPY"],
         start="2024-01-01",
         end="2024-04-01",
         min_entry_score=3.0  # Loosened parameter as recommended in audit to guarantee trade execution for visibility
     )
-    save_artifacts(curve, trades)
+    save_artifacts(curve, trades, mie_attribution=mie_attr)

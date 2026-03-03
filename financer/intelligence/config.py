@@ -24,6 +24,7 @@ class RegimeConfig:
     """Parameters for the market regime classifier."""
 
     spy_ticker: str = "SPY"
+    qqq_confirm: bool = False
     sma_long: int = 200
     sma_short: int = 50
     slope_lookback: int = 10

@@ -7,6 +7,8 @@ from financer.models.enums import Direction, OrderStatus
 from financer.models.intents import TradeIntent
 from financer.models.risk import RiskState, RiskVeto
 from financer.models.portfolio import PortfolioSnapshot
+import pandas as pd
+from financer.models.analytics import CVaRCalculator
 
 
 class RiskGovernor:
@@ -17,12 +19,57 @@ class RiskGovernor:
         max_open_risk_pct: float = 0.20,
         max_positions: int = 20,
         max_heat_R: float = 5.0,
-        pyramiding_mode: str = "off"
+        pyramiding_mode: str = "off",
+        max_cvar_99: float = 0.049
     ):
         self.max_open_risk_pct = max_open_risk_pct
         self.max_positions = max_positions
         self.max_heat_R = max_heat_R
         self.pyramiding_mode = pyramiding_mode
+        self.max_cvar_99 = max_cvar_99
+        self.cvar_calculator = CVaRCalculator()
+
+    def evaluate_intent_batch(
+        self, 
+        intents: list[TradeIntent], 
+        portfolio: PortfolioSnapshot,
+        historical_returns: dict[str, pd.Series]
+    ) -> tuple[list[TradeIntent], list[TradeIntent]]:
+        """
+        Evaluates the entire batch of BUYS globally against the CVaR limit.
+        """
+        sells = [intent for intent in intents if intent.direction == Direction.SELL]
+        buys = [intent for intent in intents if intent.direction == Direction.BUY]
+        
+        if not buys:
+            return sells, []
+
+        # 1. Calculate Current Portfolio Weights
+        current_allocs = []
+        for p in portfolio.positions:
+            if portfolio.equity > 0:
+                weight = (p.qty * p.current_price) / portfolio.equity
+                current_allocs.append((p.ticker, weight))
+
+        # 2. Extract Proposed Weights from Intents
+        proposed_allocs = []
+        for intent in buys:
+            proposed_weight = intent.meta.get("proposed_weight", 0.0)
+            proposed_allocs.append((intent.ticker, proposed_weight))
+
+        # 3. Calculate Global Proposed CVaR
+        proposed_es_99 = self.cvar_calculator.evaluate_proposed_portfolio(
+            current_allocs, proposed_allocs, historical_returns
+        )
+
+        # 4. CVaR Circuit Breaker
+        if proposed_es_99 > self.max_cvar_99:
+            veto_reason = f"RISK_LIMIT_BREACH: Proposed ES_0.99 ({proposed_es_99:.2%}) > Max Allowed ({self.max_cvar_99:.2%})"
+            for intent in buys:
+                intent.meta["veto_reason"] = veto_reason
+            return sells, buys
+            
+        return sells + buys, []
 
     def veto_intents(
         self, intents: list[TradeIntent], portfolio: PortfolioSnapshot

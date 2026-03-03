@@ -60,8 +60,7 @@ class _RegimeSmoothing:
     Not persisted across runs — each backtest starts fresh.
     """
 
-    def __init__(self, confirmation_days: int = 2):
-        self.confirmation_days = confirmation_days
+    def __init__(self):
         self._confirmed_regime: Regime = Regime.RISK_ON
         self._pending_regime: Optional[Regime] = None
         self._pending_count: int = 0
@@ -81,7 +80,14 @@ class _RegimeSmoothing:
             self._pending_regime = raw_regime
             self._pending_count = 1
 
-        if self._pending_count >= self.confirmation_days:
+        # Determine target threshold
+        target_days = 2  # default (e.g. CAUTIOUS)
+        if raw_regime == Regime.RISK_ON:
+            target_days = 3
+        elif raw_regime == Regime.RISK_OFF:
+            target_days = 2
+
+        if self._pending_count >= target_days:
             self._confirmed_regime = raw_regime
             self._pending_regime = None
             self._pending_count = 0
@@ -96,6 +102,7 @@ def classify_regime_at_date(
     date: datetime | pd.Timestamp,
     config: IntelligenceConfig,
     smoothing: Optional[_RegimeSmoothing] = None,
+    qqq_df: Optional[pd.DataFrame] = None,
 ) -> ControlPlan:
     """Classify market regime as-of *date* and return a ControlPlan.
 
@@ -112,6 +119,8 @@ def classify_regime_at_date(
     smoothing : _RegimeSmoothing, optional
         Smoothing state tracker.  If None, raw regime is used without smoothing.
         Callers running day-by-day backtests should pass a persistent instance.
+    qqq_df : pd.DataFrame, optional
+        QQQ feature DataFrame for double confirmation if config.regime.qqq_confirm is True.
 
     Returns
     -------
@@ -157,7 +166,7 @@ def classify_regime_at_date(
             
     atr_pct = atr / close if (not pd.isna(atr) and close > 0) else 0.0
 
-    # Strict Boolean Hierarchy
+    # Strict Boolean Hierarchy for SPY
     is_risk_off = False
     is_risk_on = False
 
@@ -165,6 +174,37 @@ def classify_regime_at_date(
         is_risk_off = True
     elif (close > sma50 and close > sma200) and (atr_pct < regime_cfg.atr_vol_threshold) and (slope_pct > regime_cfg.sma200_slope_threshold):
         is_risk_on = True
+
+    # QQQ Confirmation
+    if is_risk_on and regime_cfg.qqq_confirm:
+        if qqq_df is not None and not qqq_df.empty:
+            q_sliced = qqq_df.loc[:dt]
+            if not q_sliced.empty and "close" in q_sliced.columns:
+                q_row = q_sliced.iloc[-1]
+                q_close = float(q_row.get("close", 0.0))
+                q_sma50 = float(q_row.get("sma_50", float("nan")))
+                q_sma200 = float(q_row.get("sma_200", float("nan")))
+                q_atr = float(q_row.get("atr_14", float("nan")))
+                
+                q_slope_pct = 0.0
+                q_sma200_col = q_sliced.get("sma_200")
+                if q_sma200_col is not None and len(q_sma200_col) >= regime_cfg.sma200_slope_lookback + 1:
+                    q_cur_sma = q_sma200_col.iloc[-1]
+                    q_past_sma = q_sma200_col.iloc[-(regime_cfg.sma200_slope_lookback + 1)]
+                    if not pd.isna(q_cur_sma) and not pd.isna(q_past_sma) and q_past_sma != 0:
+                        q_slope_pct = (q_cur_sma - q_past_sma) / q_past_sma
+                
+                q_atr_pct = q_atr / q_close if (not pd.isna(q_atr) and q_close > 0) else 0.0
+                
+                # Check if QQQ is in RISK_ON
+                q_is_risk_on = (q_close > q_sma50 and q_close > q_sma200) and (q_atr_pct < regime_cfg.atr_vol_threshold) and (q_slope_pct > regime_cfg.sma200_slope_threshold)
+                
+                if not q_is_risk_on:
+                    is_risk_on = False
+            else:
+                is_risk_on = False
+        else:
+            is_risk_on = False
 
     if is_risk_off:
         raw_regime = Regime.RISK_OFF

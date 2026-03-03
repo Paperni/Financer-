@@ -104,9 +104,9 @@ class TestClassifyRegimeAtDate:
         assert plan.regime == Regime.RISK_ON
 
     def test_cautious_between_smas_bullish_otherwise(self):
-        # Price (430) < SMA50 (440) but > SMA200 (420)
+        # Price (435) < SMA50 (440) but > SMA200 (432.4 end)
         # Despite bullish slope and vol, fails RISK_ON condition -> falls back to CAUTIOUS
-        spy = _make_spy_df(close=430, sma_50=440, sma_200=420, atr_14=5.0,
+        spy = _make_spy_df(close=435, sma_50=440, sma_200=420, atr_14=5.0,
                            sma200_trend=0.05)
         cfg = _default_config()
         date = spy.index[-1]
@@ -194,39 +194,64 @@ class TestClassifyRegimeAtDate:
 
 class TestRegimeSmoothing:
     def test_no_change_returns_current(self):
-        sm = _RegimeSmoothing(confirmation_days=2)
+        sm = _RegimeSmoothing()
         assert sm.update(Regime.RISK_ON) == Regime.RISK_ON
 
-    def test_single_day_no_transition(self):
-        sm = _RegimeSmoothing(confirmation_days=2)
+    def test_risk_on_demands_3_days(self):
+        sm = _RegimeSmoothing()
+        sm._confirmed_regime = Regime.CAUTIOUS
+        assert sm.update(Regime.RISK_ON) == Regime.CAUTIOUS
+        assert sm.update(Regime.RISK_ON) == Regime.CAUTIOUS
         assert sm.update(Regime.RISK_ON) == Regime.RISK_ON
-        # One day of CAUTIOUS is not enough
-        assert sm.update(Regime.CAUTIOUS) == Regime.RISK_ON
 
-    def test_confirmed_transition(self):
-        sm = _RegimeSmoothing(confirmation_days=2)
-        sm.update(Regime.RISK_ON)
-        sm.update(Regime.CAUTIOUS)
-        result = sm.update(Regime.CAUTIOUS)
-        assert result == Regime.CAUTIOUS
+    def test_risk_off_demands_2_days(self):
+        sm = _RegimeSmoothing()
+        assert sm.update(Regime.RISK_OFF) == Regime.RISK_ON
+        assert sm.update(Regime.RISK_OFF) == Regime.RISK_OFF
 
     def test_whipsaw_prevented(self):
-        sm = _RegimeSmoothing(confirmation_days=2)
-        sm.update(Regime.RISK_ON)
-        sm.update(Regime.CAUTIOUS)
+        sm = _RegimeSmoothing()
+        sm.update(Regime.RISK_OFF)
         # Whipsaw back to RISK_ON before confirming
         result = sm.update(Regime.RISK_ON)
-        assert result == Regime.RISK_ON  # stays at original
+        assert result == Regime.RISK_ON  # resets pending but returns previously confirmed RISK_ON
 
     def test_smoothing_with_classify(self):
         spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=5.0,
                            sma200_trend=0.05, n_days=250)
         cfg = _default_config()
-        sm = _RegimeSmoothing(confirmation_days=2)
+        sm = _RegimeSmoothing()
 
         # First few days should be RISK_ON
         for i in range(5):
             plan = classify_regime_at_date(spy, spy.index[200 + i], cfg, smoothing=sm)
+        assert plan.regime == Regime.RISK_ON
+
+class TestQQQConfirmation:
+    def test_risk_on_with_qqq_confirmation(self):
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=5.0, sma200_trend=0.05)
+        qqq = _make_spy_df(close=350, sma_50=340, sma_200=320, atr_14=4.0, sma200_trend=0.05)
+        
+        cfg = IntelligenceConfig(regime=RegimeConfig(qqq_confirm=True))
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg, qqq_df=qqq)
+        assert plan.regime == Regime.RISK_ON
+
+    def test_risk_on_blocked_by_weak_qqq(self):
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=5.0, sma200_trend=0.05)
+        # QQQ below SMA200
+        qqq = _make_spy_df(close=300, sma_50=340, sma_200=320, atr_14=4.0, sma200_trend=0.05)
+        
+        cfg = IntelligenceConfig(regime=RegimeConfig(qqq_confirm=True))
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg, qqq_df=qqq)
+        assert plan.regime == Regime.CAUTIOUS
+
+    def test_qqq_confirm_off_ignores_weak_qqq(self):
+        spy = _make_spy_df(close=450, sma_50=440, sma_200=420, atr_14=5.0, sma200_trend=0.05)
+        # QQQ below SMA200
+        qqq = _make_spy_df(close=300, sma_50=340, sma_200=320, atr_14=4.0, sma200_trend=0.05)
+        
+        cfg = IntelligenceConfig(regime=RegimeConfig(qqq_confirm=False))
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg, qqq_df=qqq)
         assert plan.regime == Regime.RISK_ON
 
     def test_custom_regime_params_from_config(self):

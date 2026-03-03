@@ -87,8 +87,8 @@ def run_report_years(run_dir: str):
         years_data[year].append(pt)
         
     print(f"\nYear-By-Year Breakdown for: {run_dir}")
-    print(f"{'Year':<6} | {'Return %':<10} | {'Max DD %':<10} | {'Trades':<8} | {'Exp R':<8} | {'Exposure %'}")
-    print("-" * 65)
+    print(f"{'Year':<6} | {'Return %':<10} | {'Max DD %':<10} | {'Trades':<8} | {'Exp R':<8} | {'Exposure %':<11} | {'% RISK_ON':<10} | {'% CAUTIOUS':<11} | {'% RISK_OFF':<11} | {'Flips'}")
+    print("-" * 115)
     
     for year in sorted(years_data.keys()):
         curve = years_data[year]
@@ -118,9 +118,31 @@ def run_report_years(run_dir: str):
             avg_loss = sum(losses) / len(losses) if losses else 0.0
             exp_r = (win_rate * avg_win) + ((1 - win_rate) * avg_loss)
             
-        print(f"{year:<6} | {ret_pct:>9.2f}% | {mdd_pct:>9.2f}% | {trades_count:>6} | {exp_r:>6.2f} | {exposure_pct:>9.2f}%")
+        # Count Regimes
+        ro_days = sum(1 for pt in curve if pt.get("regime") == "RISK_ON")
+        cau_days = sum(1 for pt in curve if pt.get("regime") == "CAUTIOUS")
+        roff_days = sum(1 for pt in curve if pt.get("regime") == "RISK_OFF")
         
-    print("-" * 65)
+        pct_ro = (ro_days / days) * 100.0 if days > 0 else 0.0
+        pct_cau = (cau_days / days) * 100.0 if days > 0 else 0.0
+        pct_roff = (roff_days / days) * 100.0 if days > 0 else 0.0
+        
+        flips = 0
+        prev_r = None
+        for pt in curve:
+            r = pt.get("regime")
+            if r and prev_r and r != prev_r:
+                flips += 1
+            if r:
+                prev_r = r
+                
+        # If no regime tracking was saved, skip printing the columns
+        if ro_days == 0 and cau_days == 0 and roff_days == 0:
+            print(f"{year:<6} | {ret_pct:>9.2f}% | {mdd_pct:>9.2f}% | {trades_count:>6} | {exp_r:>6.2f} | {exposure_pct:>9.2f}%")
+        else:
+            print(f"{year:<6} | {ret_pct:>9.2f}% | {mdd_pct:>9.2f}% | {trades_count:>6} | {exp_r:>6.2f} | {exposure_pct:>9.2f}% | {pct_ro:>9.1f}% | {pct_cau:>10.1f}% | {pct_roff:>10.1f}% | {flips:>4}")
+        
+    print("-" * 115)
     # Print total
     overall_start = equity_curve[0]["equity"]
     overall_end = equity_curve[-1]["equity"]
@@ -145,7 +167,27 @@ def run_report_years(run_dir: str):
     tot_exposed = sum(1 for pt in equity_curve if pt.get("utilization_pct", 0) > 0)
     tot_exposure = (tot_exposed / tot_days) * 100.0 if tot_days > 0 else 0.0
     
-    print(f"{'TOTAL':<6} | {tot_ret:>9.2f}% | {tot_mdd:>9.2f}% | {tot_trades:>6} | {tot_exp:>6.2f} | {tot_exposure:>9.2f}%")
+    tot_ro_days = sum(1 for pt in equity_curve if pt.get("regime") == "RISK_ON")
+    tot_cau_days = sum(1 for pt in equity_curve if pt.get("regime") == "CAUTIOUS")
+    tot_roff_days = sum(1 for pt in equity_curve if pt.get("regime") == "RISK_OFF")
+    
+    t_pct_ro = (tot_ro_days / tot_days) * 100.0 if tot_days > 0 else 0.0
+    t_pct_cau = (tot_cau_days / tot_days) * 100.0 if tot_days > 0 else 0.0
+    t_pct_roff = (tot_roff_days / tot_days) * 100.0 if tot_days > 0 else 0.0
+    
+    tot_flips = 0
+    prev_r = None
+    for pt in equity_curve:
+        r = pt.get("regime")
+        if r and prev_r and r != prev_r:
+            tot_flips += 1
+        if r:
+            prev_r = r
+
+    if tot_ro_days == 0 and tot_cau_days == 0 and tot_roff_days == 0:
+        print(f"{'TOTAL':<6} | {tot_ret:>9.2f}% | {tot_mdd:>9.2f}% | {tot_trades:>6} | {tot_exp:>6.2f} | {tot_exposure:>9.2f}%")
+    else:
+        print(f"{'TOTAL':<6} | {tot_ret:>9.2f}% | {tot_mdd:>9.2f}% | {tot_trades:>6} | {tot_exp:>6.2f} | {tot_exposure:>9.2f}% | {t_pct_ro:>9.1f}% | {t_pct_cau:>10.1f}% | {t_pct_roff:>10.1f}% | {tot_flips:>4}")
     print("\n")
 
 
