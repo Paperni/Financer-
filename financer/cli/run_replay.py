@@ -71,8 +71,15 @@ def run_replay(
                     daily_features[ts] = {}
                 daily_features[ts][ticker] = row_dict
                 
-    trading_days = sorted(list(daily_features.keys()))
-    print(f"Total trading days to replay: {len(trading_days)}")
+    # Restrict execution to [start, end] — warmup data may exist in
+    # daily_features for indicator computation but must not be traded on.
+    start_ts = pd.Timestamp(start, tz="UTC").normalize()
+    end_ts = pd.Timestamp(end, tz="UTC").normalize()
+    trading_days = sorted(
+        d for d in daily_features.keys()
+        if start_ts <= d.normalize() <= end_ts
+    )
+    print(f"Total trading days to replay: {len(trading_days)} (window {start} to {end})")
 
     # 2. Boot up core components
     engine = SwingEngine(
