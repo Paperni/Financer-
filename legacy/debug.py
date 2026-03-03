@@ -13,7 +13,7 @@ df = pd.DataFrame({
 
 def debug():
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
     
     print("ALL TRADES:")
     for t in trades:

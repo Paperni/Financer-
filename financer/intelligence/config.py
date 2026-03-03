@@ -51,15 +51,15 @@ class RegimeConfig:
 class RegimeParamsConfig:
     """Per-regime trading parameter overrides (decision matrix)."""
 
-    risk_on_max_positions: int = 16
+    risk_on_max_positions: int = 12
     risk_on_size_mult: float = 1.0
-    risk_on_threshold: float = 5.0
-    cautious_max_positions: int = 16
+    risk_on_threshold: float = 4.0
+    cautious_max_positions: int = 6
     cautious_size_mult: float = 0.75
-    cautious_threshold: float = 5.5
+    cautious_threshold: float = 5.0
     risk_off_max_positions: int = 0
     risk_off_size_mult: float = 0.0
-    risk_off_threshold: float = 99.0
+    risk_off_threshold: float = 6.0
 
 
 @dataclass(frozen=True)

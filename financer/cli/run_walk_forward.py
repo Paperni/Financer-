@@ -159,8 +159,8 @@ def _run_single(
     feature_dfs: dict[str, pd.DataFrame],
     daily_features: dict,
     intelligence_enabled: bool = False,
-) -> dict[str, Any]:
-    """Run a single replay and return computed metrics."""
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run a single replay and return (metrics, mie_attribution)."""
     _patch_globals(config)
 
     kwargs = {
@@ -179,15 +179,21 @@ def _run_single(
             kwargs[key] = config[key]
 
     result = run_replay(**kwargs)
+    empty_attr = {
+        "regime_days": {"RISK_ON": 0, "CAUTIOUS": 0, "RISK_OFF": 0},
+        "entry_intents_total": 0, "entry_intents_vetoed_by_mie": 0,
+        "exits_forced_by_mie": 0, "forced_exit_tickers": [],
+        "scorecard_thresholds": [], "position_size_multipliers": [],
+    }
     if not result:
-        return {"max_dd_pct": 0.0, "trades": 0, "expectancy_R": 0.0,
-                "total_return_pct": 0.0, "exposure_pct": 0.0}
+        return ({"max_dd_pct": 0.0, "trades": 0, "expectancy_R": 0.0,
+                "total_return_pct": 0.0, "exposure_pct": 0.0}, empty_attr)
 
-    portfolio, equity_curve, trade_log = result
+    portfolio, equity_curve, trade_log, attribution = result
     metrics = compute_metrics(equity_curve, trade_log)
     metrics["total_return_pct"] = ((portfolio.equity / 100_000.0) - 1.0) * 100.0
     metrics["exposure_pct"] = compute_exposure_pct(equity_curve)
-    return metrics
+    return (metrics, attribution)
 
 
 # ── Report generation ────────────────────────────────────────────────────────
@@ -291,6 +297,138 @@ def _write_stability_report(
         lines.append(f"| {key} | {med_delta:>+7.2f} | {worst_delta:>+7.2f} |")
 
     (out_dir / "stability_report.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_attribution_report(
+    out_dir: Path,
+    splits: list[dict[str, str]],
+    split_attributions: list[dict[str, Any]],
+) -> None:
+    """Write mie_attribution.md and mie_attribution.csv."""
+    csv_rows: list[dict[str, Any]] = []
+    md_lines = [
+        "# MIE Attribution Report\n",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+        f"Splits: {len(splits)}\n",
+        "",
+        "## Per-Split Attribution\n",
+    ]
+
+    for sa in split_attributions:
+        si = sa["split_idx"]
+        sp = splits[si]
+        attr = sa.get("attr", {})
+        bm = sa.get("baseline_metrics", {})
+        mm = sa.get("mie_metrics", {})
+        regime_days = attr.get("regime_days", {"RISK_ON": 0, "CAUTIOUS": 0, "RISK_OFF": 0})
+        entry_total = attr.get("entry_intents_total", 0)
+        entry_vetoed = attr.get("entry_intents_vetoed_by_mie", 0)
+        exits_forced = attr.get("exits_forced_by_mie", 0)
+        forced_tickers = attr.get("forced_exit_tickers", [])
+        thresholds = attr.get("scorecard_thresholds", [])
+        multipliers = attr.get("position_size_multipliers", [])
+
+        avg_threshold = sum(thresholds) / len(thresholds) if thresholds else 0.0
+        avg_multiplier = sum(multipliers) / len(multipliers) if multipliers else 0.0
+        total_days = sum(regime_days.values())
+
+        # CSV row
+        csv_rows.append({
+            "split_idx": si,
+            "period": f"{sp['test_start']} - {sp['test_end']}",
+            "risk_on_days": regime_days.get("RISK_ON", 0),
+            "cautious_days": regime_days.get("CAUTIOUS", 0),
+            "risk_off_days": regime_days.get("RISK_OFF", 0),
+            "entry_intents_total": entry_total,
+            "entry_intents_vetoed": entry_vetoed,
+            "exits_forced_by_mie": exits_forced,
+            "avg_scorecard_threshold": round(avg_threshold, 2),
+            "avg_position_size_mult": round(avg_multiplier, 2),
+            "baseline_return_pct": round(bm.get("total_return_pct", 0), 2),
+            "mie_return_pct": round(mm.get("total_return_pct", 0), 2),
+            "baseline_trades": bm.get("trades", 0),
+            "mie_trades": mm.get("trades", 0),
+        })
+
+        # Markdown section
+        period = f"{sp['test_start']} → {sp['test_end']}"
+        md_lines.append(f"### Split {si}: {period}\n")
+        md_lines.append("| Metric | Value |")
+        md_lines.append("|--------|-------|")
+        md_lines.append(f"| RISK_ON days | {regime_days.get('RISK_ON', 0)} / {total_days} |")
+        md_lines.append(f"| CAUTIOUS days | {regime_days.get('CAUTIOUS', 0)} / {total_days} |")
+        md_lines.append(f"| RISK_OFF days | {regime_days.get('RISK_OFF', 0)} / {total_days} |")
+        md_lines.append(f"| Entry intents (total) | {entry_total} |")
+        md_lines.append(f"| Entry intents vetoed by MIE | {entry_vetoed} |")
+        md_lines.append(f"| Exits forced by MIE | {exits_forced} |")
+        if forced_tickers:
+            unique_forced = sorted(set(forced_tickers))
+            md_lines.append(f"| Forced exit tickers | {', '.join(unique_forced[:10])}{'...' if len(unique_forced) > 10 else ''} |")
+        md_lines.append(f"| Avg scorecard threshold | {avg_threshold:.2f} |")
+        md_lines.append(f"| Avg position size mult | {avg_multiplier:.2f} |")
+        md_lines.append("")
+
+        # Narrative
+        narrative = _generate_split_narrative(si, regime_days, total_days, entry_total,
+                                               entry_vetoed, exits_forced, avg_threshold,
+                                               avg_multiplier, bm, mm)
+        md_lines.append(f"**Narrative:** {narrative}\n")
+        md_lines.append("")
+
+    # Write files
+    (out_dir / "mie_attribution.md").write_text("\n".join(md_lines), encoding="utf-8")
+
+    if csv_rows:
+        with open(out_dir / "mie_attribution.csv", "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(csv_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(csv_rows)
+
+
+def _generate_split_narrative(
+    si: int,
+    regime_days: dict[str, int],
+    total_days: int,
+    entry_total: int,
+    entry_vetoed: int,
+    exits_forced: int,
+    avg_threshold: float,
+    avg_multiplier: float,
+    bm: dict[str, Any],
+    mm: dict[str, Any],
+) -> str:
+    """Generate a short human-readable narrative for a split."""
+    parts: list[str] = []
+
+    cautious_pct = (regime_days.get("CAUTIOUS", 0) / total_days * 100) if total_days else 0
+    risk_off_pct = (regime_days.get("RISK_OFF", 0) / total_days * 100) if total_days else 0
+
+    if cautious_pct > 30:
+        parts.append(f"MIE classified {cautious_pct:.0f}% of days as CAUTIOUS, tightening entry requirements")
+    if risk_off_pct > 0:
+        parts.append(f"RISK_OFF activated on {regime_days['RISK_OFF']} days, blocking all new entries")
+
+    if entry_vetoed > 0:
+        veto_pct = (entry_vetoed / entry_total * 100) if entry_total else 0
+        parts.append(f"vetoed {entry_vetoed}/{entry_total} BUY intents ({veto_pct:.0f}%)")
+
+    if exits_forced > 0:
+        parts.append(f"force-exited {exits_forced} positions during RISK_OFF regimes")
+
+    ret_delta = mm.get("total_return_pct", 0) - bm.get("total_return_pct", 0)
+    dd_delta = mm.get("max_dd_pct", 0) - bm.get("max_dd_pct", 0)
+
+    if abs(ret_delta) < 0.1 and abs(dd_delta) < 0.1:
+        parts.append("net impact was negligible — market stayed RISK_ON")
+    elif dd_delta < -0.5:
+        parts.append(f"reduced max drawdown by {abs(dd_delta):.1f}pp")
+    elif ret_delta < -1.0:
+        parts.append(f"cost {abs(ret_delta):.1f}pp return in exchange for risk protection")
+
+    if not parts:
+        return "MIE remained neutral throughout the window; no meaningful regime changes detected."
+
+    return "; ".join(parts) + "."
 
 
 # ── Main orchestrator ────────────────────────────────────────────────────────
@@ -404,6 +542,7 @@ def run_walk_forward(
 
     split_selections: list[dict[str, Any]] = []
     test_metrics: list[dict[str, Any]] = []
+    split_attributions: list[dict[str, Any]] = []
 
     for si, split in enumerate(splits):
         print(f"\n--- Split {si}: train {split['train_start']}-{split['train_end']}, "
@@ -415,7 +554,7 @@ def run_walk_forward(
 
         for ci, cfg in enumerate(configs):
             t0 = time.time()
-            m = _run_single(cfg, split["train_start"], split["train_end"],
+            m, _a = _run_single(cfg, split["train_start"], split["train_end"],
                             feature_dfs, daily_features, intelligence_enabled=False)
             dt = time.time() - t0
             score = (m["expectancy_R"], -m["max_dd_pct"], -m["exposure_pct"])
@@ -440,10 +579,12 @@ def run_walk_forward(
             "train_max_dd_pct": best_train_metrics["max_dd_pct"],
         })
 
-        # TEST: A/B
+        # TEST: A/B — collect attribution for MIE runs
+        split_attr_pair: dict[str, Any] = {"split_idx": si}
+
         for mode, intel_flag in [("baseline", False), ("mie", True)]:
             t0 = time.time()
-            m = _run_single(best_config, split["test_start"], split["test_end"],
+            m, attr = _run_single(best_config, split["test_start"], split["test_end"],
                             feature_dfs, daily_features, intelligence_enabled=intel_flag)
             dt = time.time() - t0
             print(f"  Test [{mode}]: Ret={m['total_return_pct']:.2f}%, DD={m['max_dd_pct']:.1f}%, "
@@ -459,6 +600,14 @@ def run_walk_forward(
                 "trades": m["trades"],
             })
 
+            if mode == "mie":
+                split_attr_pair["attr"] = attr
+                split_attr_pair["mie_metrics"] = m
+            else:
+                split_attr_pair["baseline_metrics"] = m
+
+        split_attributions.append(split_attr_pair)
+
     # Write outputs
     with open(out_dir / "splits.csv", "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(split_selections[0].keys()))
@@ -471,6 +620,7 @@ def run_walk_forward(
         writer.writerows(test_metrics)
 
     _write_stability_report(out_dir, splits, split_selections, test_metrics)
+    _write_attribution_report(out_dir, splits, split_attributions)
 
     print(f"\nArtifacts saved to {out_dir}")
     return out_dir

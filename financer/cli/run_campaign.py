@@ -262,7 +262,7 @@ def run_campaign():
             print("  No result returned.")
             continue
             
-        portfolio, equity_curve, trade_log = result
+        portfolio, equity_curve, trade_log, _attr = result
         
         # 3. Compute Metrics
         metrics = compute_metrics(equity_curve, trade_log)

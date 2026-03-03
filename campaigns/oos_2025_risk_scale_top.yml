@@ -1,0 +1,25 @@
+id: "oos_2025_risk_scale_top"
+
+universe:
+  use_broad_lists: true
+
+timeframe: "1d"
+start: "2025-01-01"
+end: "2025-12-31"
+
+gates:
+  min_trades: 20
+  max_dd_pct: 15.0
+  min_expectancy_R: 0.00
+
+sweep_grid:
+  score_threshold: [5]
+  stop_atr_mult: [1.75]
+  time_stop_bars: [50]
+  rsi_band:
+    - [35, 50]
+  max_positions: [16]
+  risk_per_trade_pct: [0.01]
+  max_heat_R: [7.0]
+  cautious_size_mult: [1.0]
+  pyramiding_mode: ["on"]

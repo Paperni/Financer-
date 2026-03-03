@@ -166,6 +166,9 @@ def run_replay(
         if intelligence_enabled and intel_config is not None:
             from financer.intelligence.regime import classify_regime_at_date
             spy_df = feature_dfs.get("SPY")
+            if spy_df is None and precomputed_features is not None:
+                spy_df = precomputed_features.get("SPY")
+                
             if spy_df is not None:
                 control_plan = classify_regime_at_date(
                     spy_df, current_day, intel_config, smoothing=regime_smoothing,
@@ -312,7 +315,7 @@ def save_artifacts(equity_curve, trade_log, output_dir: str = "artifacts"):
 
 
 if __name__ == "__main__":
-    portfolio, curve, trades = run_replay(
+    portfolio, curve, trades, _ = run_replay(
         tickers=["AAPL", "MSFT", "GOOGL", "SPY"],
         start="2024-01-01",
         end="2024-04-01",

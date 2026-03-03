@@ -130,7 +130,7 @@ def main():
         print(f"Different: {result_base[0].equity != result[0].equity}")
 
     if result:
-        portfolio, equity_curve, trade_log = result
+        portfolio, equity_curve, trade_log, _attr = result
         out_dir = "artifacts/runs/config_c_mie"
         os.makedirs(out_dir, exist_ok=True)
 
