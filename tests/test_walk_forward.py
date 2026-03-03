@@ -237,7 +237,13 @@ class TestWalkForwardIntegration:
             portfolio = _make_mock_portfolio()
             eq_curve = _make_mock_equity_curve()
             trade_log = _make_mock_trade_log()
-            return portfolio, eq_curve, trade_log
+            attribution = {
+                "regime_days": {"RISK_ON": 20, "CAUTIOUS": 5, "RISK_OFF": 0},
+                "entry_intents_total": 10, "entry_intents_vetoed_by_mie": 2,
+                "exits_forced_by_mie": 0, "forced_exit_tickers": [],
+                "scorecard_thresholds": [5.0] * 25, "position_size_multipliers": [1.0] * 25,
+            }
+            return portfolio, eq_curve, trade_log, attribution
 
         mock_replay.side_effect = fake_replay
 
@@ -285,7 +291,13 @@ class TestWalkForwardIntegration:
             portfolio = _make_mock_portfolio(equity=eq)
             eq_curve = _make_mock_equity_curve(end_eq=eq)
             trade_log = _make_mock_trade_log()
-            return portfolio, eq_curve, trade_log
+            attribution = {
+                "regime_days": {"RISK_ON": 20, "CAUTIOUS": 5, "RISK_OFF": 0},
+                "entry_intents_total": 10, "entry_intents_vetoed_by_mie": 2,
+                "exits_forced_by_mie": 0, "forced_exit_tickers": [],
+                "scorecard_thresholds": [5.0] * 25, "position_size_multipliers": [1.0] * 25,
+            }
+            return portfolio, eq_curve, trade_log, attribution
 
         mock_replay.side_effect = fake_replay
 
@@ -332,7 +344,13 @@ class TestWalkForwardIntegration:
 
         def fake_replay(**kwargs):
             portfolio = _make_mock_portfolio()
-            return portfolio, _make_mock_equity_curve(), _make_mock_trade_log()
+            attribution = {
+                "regime_days": {"RISK_ON": 20, "CAUTIOUS": 5, "RISK_OFF": 0},
+                "entry_intents_total": 10, "entry_intents_vetoed_by_mie": 2,
+                "exits_forced_by_mie": 0, "forced_exit_tickers": [],
+                "scorecard_thresholds": [5.0] * 25, "position_size_multipliers": [1.0] * 25,
+            }
+            return portfolio, _make_mock_equity_curve(), _make_mock_trade_log(), attribution
 
         mock_replay.side_effect = fake_replay
 

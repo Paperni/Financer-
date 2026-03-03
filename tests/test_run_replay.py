@@ -29,7 +29,7 @@ def test_golden_replay_deterministic_no_network(tmp_path):
     with patch("financer.cli.run_replay.build_features") as mock_build:
         mock_build.return_value = df_mock
         
-        portfolio, equity_curve, trade_log = run_replay(
+        portfolio, equity_curve, trade_log, *_ = run_replay(
             tickers=["SYNTH"],
             start="2025-01-01",
             end="2025-01-03",
@@ -89,7 +89,7 @@ def test_golden_replay_multiticker_deterministic_hash(tmp_path):
         return dfs[ticker]
         
     with patch("financer.cli.run_replay.build_features", side_effect=mock_build_features):
-        portfolio, eq, trades = run_replay(
+        portfolio, eq, trades, *_ = run_replay(
             tickers=["AAPL", "MSFT", "SPY"],
             start="2025-01-01",
             end="2025-02-28", # Approx 60 days
@@ -121,7 +121,7 @@ def test_veto_unknown_regime():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
 
 
@@ -135,7 +135,7 @@ def test_veto_missing_columns():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
 
 
@@ -149,7 +149,7 @@ def test_veto_earnings_blackout():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
 
 
@@ -195,7 +195,7 @@ def test_replay_respects_window_trades_outside_excluded():
     for d, row in df.iterrows():
         daily[d] = {"TICK": row.to_dict()}
 
-    port, eq, trades = run_replay(
+    port, eq, trades, *_ = run_replay(
         tickers=["TICK"],
         start="2025-01-02",
         end="2025-01-03",
@@ -240,7 +240,7 @@ def test_replay_equity_curve_within_bounds():
         daily[d] = {"TICK": row.to_dict()}
 
     # Request only days 4-7 (2025-01-04 to 2025-01-07)
-    port, eq, trades = run_replay(
+    port, eq, trades, *_ = run_replay(
         tickers=["TICK"],
         start="2025-01-04",
         end="2025-01-07",
@@ -270,7 +270,7 @@ def test_integrity_no_multiple_buys():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
     
     # Assert Day 1 buys the ticket
     day1 = trades[0]
