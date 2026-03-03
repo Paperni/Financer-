@@ -98,18 +98,21 @@ def _regime_to_params(regime: Regime, params: RegimeParamsConfig) -> dict:
     """Look up trading parameters for a given regime."""
     if regime == Regime.RISK_ON:
         return {
+            "allow_entries": True,
             "max_positions": params.risk_on_max_positions,
             "position_size_multiplier": params.risk_on_size_mult,
             "scorecard_threshold": params.risk_on_threshold,
         }
     if regime == Regime.RISK_OFF:
         return {
+            "allow_entries": False,
             "max_positions": params.risk_off_max_positions,
             "position_size_multiplier": params.risk_off_size_mult,
             "scorecard_threshold": params.risk_off_threshold,
         }
     # CAUTIOUS
     return {
+        "allow_entries": True,
         "max_positions": params.cautious_max_positions,
         "position_size_multiplier": params.cautious_size_mult,
         "scorecard_threshold": params.cautious_threshold,
@@ -269,10 +272,21 @@ def classify_regime_at_date(
         source="intelligence.regime_classifier"
     )
     
+    # Enforce Clamps
+    raw_max_pos = trading_params["max_positions"]
+    clamped_max_pos = min(raw_max_pos, params_cfg.risk_on_max_positions)
+    
+    raw_size_mult = trading_params["position_size_multiplier"]
+    clamped_size_mult = max(0.0, min(1.0, raw_size_mult))
+    
+    raw_threshold = trading_params["scorecard_threshold"]
+    clamped_threshold = max(4.0, min(6.0, raw_threshold))
+
     policy = PolicyOverrides(
-        max_positions=trading_params["max_positions"],
-        position_size_multiplier=trading_params["position_size_multiplier"],
-        scorecard_threshold=trading_params["scorecard_threshold"]
+        allow_entries=trading_params["allow_entries"],
+        max_positions=clamped_max_pos,
+        position_size_multiplier=clamped_size_mult,
+        scorecard_threshold=clamped_threshold
     )
 
     return ControlPlan(state=state, policy=policy)

@@ -28,6 +28,7 @@ class MarketState(BaseModel):
 
 class PolicyOverrides(BaseModel):
     """The derived execution rules dictated by the intelligence engine."""
+    allow_entries: bool = True
     max_positions: int = 10
     position_size_multiplier: float = 1.0
     scorecard_threshold: float = 5.0
@@ -116,6 +117,7 @@ def neutral_plan(as_of: Optional[datetime] = None) -> ControlPlan:
         source="neutral_fallback"
     )
     policy = PolicyOverrides(
+        allow_entries=True,
         max_positions=10,
         position_size_multiplier=1.0,
         scorecard_threshold=5.0

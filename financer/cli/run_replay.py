@@ -170,14 +170,16 @@ def run_replay(
                 control_plan = classify_regime_at_date(
                     spy_df, current_day, intel_config, smoothing=regime_smoothing,
                 )
-                # Override engine score threshold for this cycle
-                engine.min_entry_score = control_plan.scorecard_threshold
+                if control_plan.policy.allow_entries:
+                    # Override engine score threshold for this cycle
+                    engine.min_entry_score = control_plan.scorecard_threshold
+                    mie_attribution["scorecard_thresholds"].append(control_plan.scorecard_threshold)
+                    mie_attribution["position_size_multipliers"].append(control_plan.position_size_multiplier)
+                
                 # Track attribution
                 regime_name = control_plan.regime.value
                 if regime_name in mie_attribution["regime_days"]:
                     mie_attribution["regime_days"][regime_name] += 1
-                mie_attribution["scorecard_thresholds"].append(control_plan.scorecard_threshold)
-                mie_attribution["position_size_multipliers"].append(control_plan.position_size_multiplier)
             else:
                 engine.min_entry_score = min_entry_score
         else:
@@ -185,7 +187,10 @@ def run_replay(
 
         # Get Intents from Swing Engine
         alloc_intent = determine_allocation(risk_state.regime)
-        trade_intents = engine.evaluate(latest_features)
+        if control_plan is None or control_plan.policy.allow_entries:
+            trade_intents = engine.evaluate(latest_features)
+        else:
+            trade_intents = []
 
         # Track entry intents for attribution
         entry_intents_today = [i for i in trade_intents if i.direction == Direction.BUY]

@@ -197,7 +197,8 @@ class TestClassifyRegimeAtDate:
         plan = classify_regime_at_date(spy, spy.index[-1], cfg)
         assert plan.max_positions == 0
         assert plan.position_size_multiplier == 0.0
-        assert plan.scorecard_threshold == 99.0
+        assert plan.scorecard_threshold == 6.0  # Clamped from 99.0 downward to 6.0
+        assert plan.policy.allow_entries is False
 
     def test_control_plan_cautious_params(self):
         spy = _make_spy_df(close=430, sma_50=440, sma_200=420, atr_14=9.0,
@@ -262,6 +263,7 @@ class TestClassifyRegimeAtDate:
         plan = classify_regime_at_date(spy, spy.index[-1], cfg)
         assert plan.regime == Regime.RISK_OFF
         assert plan.max_positions == 0  # Blocks new entries
+        assert plan.policy.allow_entries is False
         assert not getattr(plan, 'crash_flag', False)  # Allows exits/stops without auto-flatten
 
     def test_vol_shock_cautious_override(self):
