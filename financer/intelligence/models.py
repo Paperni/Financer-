@@ -43,6 +43,9 @@ class ControlPlan(BaseModel):
     state: MarketState = Field(default_factory=MarketState)
     policy: PolicyOverrides = Field(default_factory=PolicyOverrides)
 
+    # ── Crash flag: gates forced liquidation of existing positions ──────────
+    crash_flag: bool = False
+
     # ── Reserved for future intelligence, do not use unless computed ─────────
     event_risk: Optional[str] = None           # e.g., "CLEAR" | "CAUTION" | "HIGH_RISK"
     next_event: Optional[str] = None

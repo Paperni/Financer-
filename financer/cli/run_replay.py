@@ -116,6 +116,17 @@ def run_replay(
     equity_curve = []
     trade_log = []
 
+    # MIE attribution tracking
+    mie_attribution: dict = {
+        "regime_days": {"RISK_ON": 0, "CAUTIOUS": 0, "RISK_OFF": 0},
+        "entry_intents_total": 0,
+        "entry_intents_vetoed_by_mie": 0,
+        "exits_forced_by_mie": 0,
+        "forced_exit_tickers": [],
+        "scorecard_thresholds": [],
+        "position_size_multipliers": [],
+    }
+
     # 3. Simulate day-by-day
     for current_day in trading_days:
         day_str = current_day.strftime("%Y-%m-%d")
@@ -161,6 +172,12 @@ def run_replay(
                 )
                 # Override engine score threshold for this cycle
                 engine.min_entry_score = control_plan.scorecard_threshold
+                # Track attribution
+                regime_name = control_plan.regime.value
+                if regime_name in mie_attribution["regime_days"]:
+                    mie_attribution["regime_days"][regime_name] += 1
+                mie_attribution["scorecard_thresholds"].append(control_plan.scorecard_threshold)
+                mie_attribution["position_size_multipliers"].append(control_plan.position_size_multiplier)
             else:
                 engine.min_entry_score = min_entry_score
         else:
@@ -170,6 +187,10 @@ def run_replay(
         alloc_intent = determine_allocation(risk_state.regime)
         trade_intents = engine.evaluate(latest_features)
 
+        # Track entry intents for attribution
+        entry_intents_today = [i for i in trade_intents if i.direction == Direction.BUY]
+        mie_attribution["entry_intents_total"] += len(entry_intents_today)
+
         exit_intents, trail_updates = pos_manager.evaluate_exits(portfolio, latest_features, current_day)
 
         # Apply pure trail updates mutations safely here
@@ -177,8 +198,8 @@ def run_replay(
             if pos.ticker in trail_updates:
                 pos.stop_loss = trail_updates[pos.ticker]
 
-        # RISK_OFF emergency exits: ControlPlan says zero exposure
-        if control_plan is not None and control_plan.max_positions == 0:
+        # RISK_OFF emergency exits: only auto-flatten if crash_flag is set
+        if control_plan is not None and control_plan.max_positions == 0 and getattr(control_plan, 'crash_flag', False):
             exited_tickers = {ei.ticker for ei in exit_intents}
             for pos in portfolio.positions:
                 if pos.ticker not in exited_tickers:
@@ -192,6 +213,8 @@ def run_replay(
                         reasons=[ReasonCode(code="REGIME_EXIT", detail="RISK_OFF regime exit")],
                         meta={"latest_price": curr},
                     ))
+                    mie_attribution["exits_forced_by_mie"] += 1
+                    mie_attribution["forced_exit_tickers"].append(pos.ticker)
 
         all_intents = trade_intents + exit_intents
         
@@ -261,8 +284,14 @@ def run_replay(
 
     # Save outputs
     print(f"\nReplay Complete! Final Equity: ${portfolio.equity:,.2f}")
-    
-    return portfolio, equity_curve, trade_log
+
+    # Count vetoed BUY intents from trade_log (MIE attribution)
+    for day in trade_log:
+        for v in day.get("vetoed_intents", []):
+            if v.get("direction") == "BUY":
+                mie_attribution["entry_intents_vetoed_by_mie"] += 1
+
+    return portfolio, equity_curve, trade_log, mie_attribution
 
 
 def save_artifacts(equity_curve, trade_log, output_dir: str = "artifacts"):

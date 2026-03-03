@@ -202,9 +202,9 @@ class TestClassifyRegimeAtDate:
                            sma200_trend=0.0)
         cfg = _default_config()
         plan = classify_regime_at_date(spy, spy.index[-1], cfg)
-        assert plan.max_positions == 4
-        assert plan.position_size_multiplier == 0.50
-        assert plan.scorecard_threshold == 6.0
+        assert plan.max_positions == 16
+        assert plan.position_size_multiplier == 0.75
+        assert plan.scorecard_threshold == 5.5
 
     def test_missing_spy_returns_neutral(self):
         empty = pd.DataFrame()
@@ -242,6 +242,25 @@ class TestClassifyRegimeAtDate:
         plan = classify_regime_at_date(spy, spy.index[-1], cfg)
         assert len(plan.narrative) > 0
         assert "structure=" in plan.narrative
+
+    def test_cautious_size_mult_not_below_075(self):
+        # Force CAUTIOUS regime
+        spy = _make_spy_df(close=430, sma_50=440, sma_200=420, atr_14=9.0,
+                           sma200_trend=0.0)
+        cfg = _default_config()
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg)
+        assert plan.regime == Regime.CAUTIOUS
+        assert plan.position_size_multiplier >= 0.75
+
+    def test_risk_off_blocks_entries_but_allows_stops(self):
+        # Force RISK_OFF regime
+        spy = _make_spy_df(close=400, sma_50=440, sma_200=420, atr_14=5.0,
+                           sma200_trend=-0.05)
+        cfg = _default_config()
+        plan = classify_regime_at_date(spy, spy.index[-1], cfg)
+        assert plan.regime == Regime.RISK_OFF
+        assert plan.max_positions == 0  # Blocks new entries
+        assert not getattr(plan, 'crash_flag', False)  # Allows exits/stops without auto-flatten
 
 
 # ── Smoothing ────────────────────────────────────────────────────────────────
