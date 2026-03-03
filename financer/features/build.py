@@ -76,6 +76,7 @@ def build_features(
     market_ticker: str = "SPY",
     use_cache: bool = True,
     cache_dir: Path | None = None,
+    require_cache: bool = False,
 ) -> pd.DataFrame:
     """Build a complete features DataFrame for a single ticker.
 
@@ -118,8 +119,8 @@ def build_features(
     start_dt = pd.Timestamp(start, tz="UTC")
     warmup_start = (start_dt - pd.Timedelta(days=300)).strftime("%Y-%m-%d")
 
-    bars = get_bars(ticker, start=warmup_start, end=end, timeframe=timeframe, provider=provider)
-    market_bars = get_bars(market_ticker, start=warmup_start, end=end, timeframe=timeframe, provider=provider)
+    bars = get_bars(ticker, start=warmup_start, end=end, timeframe=timeframe, provider=provider, require_cache=require_cache)
+    market_bars = get_bars(market_ticker, start=warmup_start, end=end, timeframe=timeframe, provider=provider, require_cache=require_cache)
 
     if bars.empty:
         return _empty_features(start, end)

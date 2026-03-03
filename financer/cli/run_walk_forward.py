@@ -306,6 +306,7 @@ def run_walk_forward(
     wf_id: str | None = None,
     replay_fn=None,
     tickers: list[str] | None = None,
+    require_cache: bool = False,
 ) -> Path:
     """Run walk-forward A/B evaluation.
 
@@ -344,9 +345,15 @@ def run_walk_forward(
 
     # Pre-compute features for the full range
     print(f"Loading universe and building features for {overall_start} to {overall_end}...")
+    skipped_tickers: list[tuple[str, str]] = []
+
     if tickers is not None:
         # Explicit override — skip preflight, trust caller
         print(f"Using explicit ticker list: {len(tickers)} tickers")
+    elif require_cache:
+        # Cache-only mode: use full universe, skip network preflight
+        tickers = list(dict.fromkeys(BROAD_STOCKS + BROAD_ETFS))
+        print(f"Cache-only mode: {len(tickers)} tickers (no preflight)")
     else:
         tickers = list(dict.fromkeys(BROAD_STOCKS + BROAD_ETFS))
         # Preflight: filter active tickers
@@ -366,13 +373,22 @@ def run_walk_forward(
     feature_dfs: dict[str, pd.DataFrame] = {}
     for i, ticker in enumerate(tickers, 1):
         try:
-            df = build_features(ticker, start=overall_start, end=overall_end)
+            df = build_features(ticker, start=overall_start, end=overall_end, require_cache=require_cache)
             if not df.empty:
                 feature_dfs[ticker] = df
-        except DataFetchError:
-            pass
+        except DataFetchError as e:
+            skipped_tickers.append((ticker, str(e)))
         if i % 50 == 0 or i == len(tickers):
-            print(f"Features: {i}/{len(tickers)}")
+            print(f"Features: {i}/{len(tickers)} (loaded: {len(feature_dfs)}, skipped: {len(skipped_tickers)})")
+
+    if skipped_tickers:
+        skip_path = out_dir / "skipped_tickers.csv"
+        with open(skip_path, "w", newline="") as f:
+            import csv as csv_mod
+            w = csv_mod.writer(f)
+            w.writerow(["ticker", "reason"])
+            w.writerows(skipped_tickers)
+        print(f"Skipped {len(skipped_tickers)} tickers → {skip_path}")
 
     # Transpose for daily lookup
     daily_features: dict[Any, dict[str, dict]] = {}
@@ -475,6 +491,12 @@ if __name__ == "__main__":
         help="Comma-separated ticker list; overrides universe (skips preflight fetch).",
     )
     parser.add_argument(
+        "--require-cache",
+        action="store_true",
+        default=False,
+        help="Cache-only mode: do not fetch from network, skip tickers without cached features.",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="Preset: 2024-2025, 12mo train, 3mo test/step, top_n=3. Overridden by explicit flags.",
@@ -518,4 +540,5 @@ if __name__ == "__main__":
         test_months=test_months,
         step_months=step_months,
         tickers=ticker_list,
+        require_cache=args.require_cache,
     )

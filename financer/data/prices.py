@@ -105,8 +105,16 @@ def get_bars(
     end: str,
     timeframe: str = "1d",
     provider: Callable[..., pd.DataFrame] | None = None,
+    require_cache: bool = False,
 ) -> pd.DataFrame:
-    """Fetch and normalize OHLCV bars for a single ticker with caching."""
+    """Fetch and normalize OHLCV bars for a single ticker with caching.
+
+    Parameters
+    ----------
+    require_cache : bool
+        If True, raise DataFetchError on cache miss instead of hitting
+        the network.  Used for offline / cache-only execution modes.
+    """
     # 1. Check Cache First
     cache_dir = Path("artifacts/data_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -117,8 +125,14 @@ def get_bars(
             return pd.read_parquet(cache_path)
         except Exception:
             pass # Fallback to fetch if cache is corrupted
-            
-    # 2. Fetch Data
+
+    # 2. Cache-only guard
+    if require_cache:
+        raise DataFetchError(
+            f"Cache miss for {ticker} ({start}→{end}), network disabled (require_cache=True)"
+        )
+
+    # 3. Fetch Data
     fetch = provider or _default_provider
     try:
         raw = fetch(ticker, start, end, timeframe)
@@ -129,7 +143,7 @@ def get_bars(
         
     df = _normalize(raw)
     
-    # 3. Save to Cache Output
+    # 4. Save to Cache Output
     if not df.empty:
         df.to_parquet(cache_path)
         
