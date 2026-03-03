@@ -122,7 +122,14 @@ def write_leaderboard_md(path, survivors):
 def run_campaign():
     parser = argparse.ArgumentParser(description="Run Campaign Sweep")
     parser.add_argument("--config", required=True, help="Path to campaign YAML config")
+    parser.add_argument(
+        "--require-cache",
+        action="store_true",
+        default=False,
+        help="Cache-only mode: do not fetch from network, skip tickers without cached features.",
+    )
     args = parser.parse_args()
+    require_cache = args.require_cache
     
     with open(args.config, "r") as f:
         cfg = yaml.safe_load(f)
@@ -151,30 +158,33 @@ def run_campaign():
         end_date = cfg["end"]
     
     gates = cfg["gates"]
-    
-    print(f"\n--- PREFLIGHT VALIDATION: Checking {len(tickers)} tickers for active data ---")
-    active_tickers = []
     skipped_tickers = []
     
-    # Check last 7 days from end_date as preflight
-    end_dt = pd.to_datetime(end_date)
-    preflight_start = (end_dt - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    
-    for i, ticker in enumerate(tickers, 1):
-        try:
-            bars = get_bars(ticker, start=preflight_start, end=end_date)
-            if bars.empty:
-                skipped_tickers.append((ticker, "Empty or dead ticker"))
-            else:
-                active_tickers.append(ticker)
-        except DataFetchError as e:
-            skipped_tickers.append((ticker, str(e)))
+    if require_cache:
+        print(f"\n--- CACHE-ONLY MODE: skipping preflight, using {len(tickers)} tickers ---")
+    else:
+        print(f"\n--- PREFLIGHT VALIDATION: Checking {len(tickers)} tickers for active data ---")
+        active_tickers = []
         
-        if i % 25 == 0 or i == len(tickers):
-            print(f"Preflight Progress: {i}/{len(tickers)} (Active: {len(active_tickers)}, Skipped: {len(skipped_tickers)})")
+        # Check last 7 days from end_date as preflight
+        end_dt = pd.to_datetime(end_date)
+        preflight_start = (end_dt - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        for i, ticker in enumerate(tickers, 1):
+            try:
+                bars = get_bars(ticker, start=preflight_start, end=end_date)
+                if bars.empty:
+                    skipped_tickers.append((ticker, "Empty or dead ticker"))
+                else:
+                    active_tickers.append(ticker)
+            except DataFetchError as e:
+                skipped_tickers.append((ticker, str(e)))
             
-    tickers = active_tickers
-    print(f"Preflight complete. {len(tickers)} tickers active. {len(skipped_tickers)} skipped.\n")
+            if i % 25 == 0 or i == len(tickers):
+                print(f"Preflight Progress: {i}/{len(tickers)} (Active: {len(active_tickers)}, Skipped: {len(skipped_tickers)})")
+                
+        tickers = active_tickers
+        print(f"Preflight complete. {len(tickers)} tickers active. {len(skipped_tickers)} skipped.\n")
 
     print(f"Precomputing features for {len(tickers)} active tickers from {start_date} to {end_date}...")
     t_start = time.time()
@@ -184,7 +194,7 @@ def run_campaign():
     err_count = 0
     for i, ticker in enumerate(tickers, 1):
         try:
-            df = build_features(ticker, start=start_date, end=end_date)
+            df = build_features(ticker, start=start_date, end=end_date, require_cache=require_cache)
             if not df.empty:
                 feature_dfs[ticker] = df
                 ok_count += 1
@@ -252,7 +262,7 @@ def run_campaign():
             print("  No result returned.")
             continue
             
-        portfolio, equity_curve, trade_log = result
+        portfolio, equity_curve, trade_log, _attr = result
         
         # 3. Compute Metrics
         metrics = compute_metrics(equity_curve, trade_log)

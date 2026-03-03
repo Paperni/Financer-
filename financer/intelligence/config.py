@@ -24,6 +24,7 @@ class RegimeConfig:
     """Parameters for the market regime classifier."""
 
     spy_ticker: str = "SPY"
+    qqq_confirm: bool = False
     sma_long: int = 200
     sma_short: int = 50
     slope_lookback: int = 10
@@ -42,21 +43,24 @@ class RegimeConfig:
     sma200_slope_lookback: int = 20
     sma200_slope_threshold: float = 0.0
     atr_vol_threshold: float = 0.03
+    vol_shock_lookback: int = 5
+    vol_shock_cautious_threshold: float = 0.035
+    vol_shock_risk_off_threshold: float = 0.045
 
 
 @dataclass(frozen=True)
 class RegimeParamsConfig:
     """Per-regime trading parameter overrides (decision matrix)."""
 
-    risk_on_max_positions: int = 16
+    risk_on_max_positions: int = 12
     risk_on_size_mult: float = 1.0
-    risk_on_threshold: float = 5.0
-    cautious_max_positions: int = 4
-    cautious_size_mult: float = 0.50
-    cautious_threshold: float = 6.0
+    risk_on_threshold: float = 4.0
+    cautious_max_positions: int = 6
+    cautious_size_mult: float = 0.75
+    cautious_threshold: float = 5.0
     risk_off_max_positions: int = 0
     risk_off_size_mult: float = 0.0
-    risk_off_threshold: float = 99.0
+    risk_off_threshold: float = 6.0
 
 
 @dataclass(frozen=True)

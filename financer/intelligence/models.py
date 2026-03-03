@@ -28,6 +28,7 @@ class MarketState(BaseModel):
 
 class PolicyOverrides(BaseModel):
     """The derived execution rules dictated by the intelligence engine."""
+    allow_entries: bool = True
     max_positions: int = 10
     position_size_multiplier: float = 1.0
     scorecard_threshold: float = 5.0
@@ -42,6 +43,9 @@ class ControlPlan(BaseModel):
 
     state: MarketState = Field(default_factory=MarketState)
     policy: PolicyOverrides = Field(default_factory=PolicyOverrides)
+
+    # ── Crash flag: gates forced liquidation of existing positions ──────────
+    crash_flag: bool = False
 
     # ── Reserved for future intelligence, do not use unless computed ─────────
     event_risk: Optional[str] = None           # e.g., "CLEAR" | "CAUTION" | "HIGH_RISK"
@@ -113,6 +117,7 @@ def neutral_plan(as_of: Optional[datetime] = None) -> ControlPlan:
         source="neutral_fallback"
     )
     policy = PolicyOverrides(
+        allow_entries=True,
         max_positions=10,
         position_size_multiplier=1.0,
         scorecard_threshold=5.0

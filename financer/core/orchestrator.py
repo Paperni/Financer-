@@ -7,7 +7,7 @@ from financer.models.enums import Direction
 from financer.models.intents import AllocationIntent, TradeIntent
 from financer.models.portfolio import PortfolioSnapshot
 from financer.models.risk import RiskState
-from financer.models.sizing import position_size
+from financer.models.sizing import position_size, VolatilityTargetingSizer
 
 from .governor import RiskGovernor
 
@@ -24,6 +24,7 @@ class CIOOrchestrator:
         self.governor = governor or RiskGovernor()
         self.cautious_size_mult = cautious_size_mult
         self.risk_per_trade_pct = risk_per_trade_pct
+        self.sizer = VolatilityTargetingSizer()
 
     def formulate_plan(
         self,
@@ -32,12 +33,10 @@ class CIOOrchestrator:
         portfolio: PortfolioSnapshot,
         risk_state: RiskState,
         control_plan: object | None = None,
+        historical_returns: dict | None = None,
     ) -> ActionPlan:
-        """Merge all intents into a single executable ActionPlan.
-
-        If *control_plan* is provided, its ``position_size_multiplier`` scales
-        qty and its ``max_positions`` is forwarded to the risk governor.
-        """
+        """Merge all intents into a single executable ActionPlan."""
+        historical_returns = historical_returns or {}
         plan = ActionPlan(rationale="CIO formulation based on incoming intents.")
 
         # Process allocations
@@ -51,39 +50,37 @@ class CIOOrchestrator:
         approved_trade_intents, vetoed_intents = self.governor.veto_intents(trade_intents, portfolio)
         plan.vetoed_intents.extend(vetoed_intents)
 
-        # Process trade intents
+        # Process trade intents sizing first
         for intent in approved_trade_intents:
-            # 1. Size the intent into an Order
-            # Map conviction string matching integer scores (5-8) for sizing
-            score_map = {
-                "LOW": 5,
-                "MEDIUM": 6,
-                "HIGH": 7,
-                "VERY_HIGH": 8
-            }
-            score = score_map.get(intent.conviction.value, 5)
+            if intent.direction == Direction.BUY:
+                asset_vol = intent.meta.get("annualized_vol", 0.15)
+                proposed_weight = self.sizer.calculate_weight(asset_vol)
+                intent.meta["proposed_weight"] = proposed_weight
+                
+                price = intent.meta.get("latest_price", 100.0)
+                qty = self.sizer.calculate_qty(price, portfolio.equity, asset_vol)
+                
+                # Apply ControlPlan position_size_multiplier to entries only
+                if control_plan is not None and hasattr(control_plan, "position_size_multiplier"):
+                    qty = max(0, int(qty * control_plan.position_size_multiplier))
+                
+                intent.meta["proposed_qty"] = qty
+            else:
+                intent.meta["proposed_qty"] = intent.meta.get("exit_qty", 0)
 
-            # Requires a current price. Pull from portfolio positions or intent meta.
-            # Real execution would fetch real-time mid-price. 
-            price = intent.meta.get("latest_price", 100.0)
-            atr = intent.meta.get("atr_14", 1.0)
-
-            sizing_result = position_size(
-                price=price,
-                atr=atr,
-                equity=portfolio.equity,
-                regime=risk_state.regime,
-                score=score,
-                risk_per_trade_pct=self.risk_per_trade_pct
+        # Batch evaluation for Portfolio CVaR limit
+        if hasattr(self.governor, "evaluate_intent_batch"):
+            approved_trade_intents, cvar_vetoed = self.governor.evaluate_intent_batch(
+                approved_trade_intents, portfolio, historical_returns
             )
+            plan.vetoed_intents.extend(cvar_vetoed)
 
-            qty = sizing_result["qty"]
-
-            # Apply ControlPlan position_size_multiplier to entries only
-            if (control_plan is not None
-                    and hasattr(control_plan, "position_size_multiplier")
-                    and intent.direction == Direction.BUY):
-                qty = max(0, int(qty * control_plan.position_size_multiplier))
+        for intent in approved_trade_intents:
+            qty = intent.meta.get("proposed_qty", 0)
+            if qty <= 0:
+                continue
+                
+            price = intent.meta.get("latest_price", 100.0)
 
             # Skip size 0
             if qty <= 0:

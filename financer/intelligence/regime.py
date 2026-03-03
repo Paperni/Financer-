@@ -24,92 +24,28 @@ from .models import ControlPlan, MarketState, PolicyOverrides, neutral_plan
 logger = logging.getLogger(__name__)
 
 
-# ── Signal functions (pure, no side effects) ─────────────────────────────────
 
-def _sma_structure_signal(
-    close: float,
-    sma50: float,
-    sma200: float,
-) -> float:
-    """Score SMA structure: +1 bullish, 0 neutral, -1 bearish."""
-    if pd.isna(close) or pd.isna(sma200):
-        return 0.0
-    if close < sma200:
-        return -1.0
-    if pd.isna(sma50) or close < sma50:
-        return 0.0  # between SMA-200 and SMA-50 = neutral
-    return 1.0  # above both
-
-
-def _sma200_slope_signal(
-    sma200_series: pd.Series,
-    lookback: int,
-    threshold: float,
-) -> float:
-    """Score SMA-200 slope: +1 rising, 0 flat, -1 falling."""
-    if len(sma200_series) < lookback + 1:
-        return 0.0
-    current = sma200_series.iloc[-1]
-    past = sma200_series.iloc[-(lookback + 1)]
-    if pd.isna(current) or pd.isna(past) or past == 0:
-        return 0.0
-    slope_pct = (current - past) / past
-    if slope_pct > threshold:
-        return 1.0
-    if slope_pct < -threshold:
-        return -1.0
-    return 0.0
-
-
-def _atr_volatility_signal(
-    atr: float,
-    close: float,
-    vol_threshold: float,
-) -> float:
-    """Score ATR% volatility: +1 low vol, 0 normal, -1 high vol."""
-    if pd.isna(atr) or pd.isna(close) or close <= 0:
-        return 0.0
-    atr_pct = atr / close
-    if atr_pct > vol_threshold:
-        return -1.0
-    if atr_pct < vol_threshold * 0.5:
-        return 1.0
-    return 0.0
-
-
-# ── Composite classification ─────────────────────────────────────────────────
-
-def _composite_to_regime(composite: float) -> Regime:
-    """Map composite score to Regime enum.
-
-    Range: -3.0 to +3.0
-      >= +2  -> RISK_ON
-      <= -1  -> RISK_OFF
-      else   -> CAUTIOUS
-    """
-    if composite >= 2.0:
-        return Regime.RISK_ON
-    if composite <= -1.0:
-        return Regime.RISK_OFF
-    return Regime.CAUTIOUS
 
 
 def _regime_to_params(regime: Regime, params: RegimeParamsConfig) -> dict:
     """Look up trading parameters for a given regime."""
     if regime == Regime.RISK_ON:
         return {
+            "allow_entries": True,
             "max_positions": params.risk_on_max_positions,
             "position_size_multiplier": params.risk_on_size_mult,
             "scorecard_threshold": params.risk_on_threshold,
         }
     if regime == Regime.RISK_OFF:
         return {
+            "allow_entries": False,
             "max_positions": params.risk_off_max_positions,
             "position_size_multiplier": params.risk_off_size_mult,
             "scorecard_threshold": params.risk_off_threshold,
         }
     # CAUTIOUS
     return {
+        "allow_entries": True,
         "max_positions": params.cautious_max_positions,
         "position_size_multiplier": params.cautious_size_mult,
         "scorecard_threshold": params.cautious_threshold,
@@ -124,8 +60,7 @@ class _RegimeSmoothing:
     Not persisted across runs — each backtest starts fresh.
     """
 
-    def __init__(self, confirmation_days: int = 2):
-        self.confirmation_days = confirmation_days
+    def __init__(self):
         self._confirmed_regime: Regime = Regime.RISK_ON
         self._pending_regime: Optional[Regime] = None
         self._pending_count: int = 0
@@ -145,7 +80,14 @@ class _RegimeSmoothing:
             self._pending_regime = raw_regime
             self._pending_count = 1
 
-        if self._pending_count >= self.confirmation_days:
+        # Determine target threshold
+        target_days = 2  # default (e.g. CAUTIOUS)
+        if raw_regime == Regime.RISK_ON:
+            target_days = 3
+        elif raw_regime == Regime.RISK_OFF:
+            target_days = 2
+
+        if self._pending_count >= target_days:
             self._confirmed_regime = raw_regime
             self._pending_regime = None
             self._pending_count = 0
@@ -160,6 +102,7 @@ def classify_regime_at_date(
     date: datetime | pd.Timestamp,
     config: IntelligenceConfig,
     smoothing: Optional[_RegimeSmoothing] = None,
+    qqq_df: Optional[pd.DataFrame] = None,
 ) -> ControlPlan:
     """Classify market regime as-of *date* and return a ControlPlan.
 
@@ -176,6 +119,8 @@ def classify_regime_at_date(
     smoothing : _RegimeSmoothing, optional
         Smoothing state tracker.  If None, raw regime is used without smoothing.
         Callers running day-by-day backtests should pass a persistent instance.
+    qqq_df : pd.DataFrame, optional
+        QQQ feature DataFrame for double confirmation if config.regime.qqq_confirm is True.
 
     Returns
     -------
@@ -212,52 +157,99 @@ def classify_regime_at_date(
 
     # Build SMA-200 series for slope calculation
     sma200_col = sliced.get("sma_200")
-    if sma200_col is None:
-        sma200_col = pd.Series(dtype=float)
+    slope_pct = 0.0
+    if sma200_col is not None and len(sma200_col) >= regime_cfg.sma200_slope_lookback + 1:
+        current_sma = sma200_col.iloc[-1]
+        past_sma = sma200_col.iloc[-(regime_cfg.sma200_slope_lookback + 1)]
+        if not pd.isna(current_sma) and not pd.isna(past_sma) and past_sma != 0:
+            slope_pct = (current_sma - past_sma) / past_sma
+            
+    atr_pct = atr / close if (not pd.isna(atr) and close > 0) else 0.0
 
-    # Signal 1: SMA structure
-    sig_structure = _sma_structure_signal(close, sma50, sma200)
+    # Strict Boolean Hierarchy for SPY
+    is_risk_off = False
+    is_risk_on = False
 
-    # Signal 2: SMA-200 slope
-    sig_slope = _sma200_slope_signal(
-        sma200_col,
-        lookback=regime_cfg.sma200_slope_lookback,
-        threshold=regime_cfg.sma200_slope_threshold,
-    )
+    if (close < sma200) or (atr_pct > regime_cfg.atr_vol_threshold) or (slope_pct < -regime_cfg.sma200_slope_threshold):
+        is_risk_off = True
+    elif (close > sma50 and close > sma200) and (atr_pct < regime_cfg.atr_vol_threshold) and (slope_pct > regime_cfg.sma200_slope_threshold):
+        is_risk_on = True
 
-    # Signal 3: ATR% volatility
-    sig_vol = _atr_volatility_signal(atr, close, regime_cfg.atr_vol_threshold)
+    # QQQ Confirmation
+    if is_risk_on and regime_cfg.qqq_confirm:
+        if qqq_df is not None and not qqq_df.empty:
+            q_sliced = qqq_df.loc[:dt]
+            if not q_sliced.empty and "close" in q_sliced.columns:
+                q_row = q_sliced.iloc[-1]
+                q_close = float(q_row.get("close", 0.0))
+                q_sma50 = float(q_row.get("sma_50", float("nan")))
+                q_sma200 = float(q_row.get("sma_200", float("nan")))
+                q_atr = float(q_row.get("atr_14", float("nan")))
+                
+                q_slope_pct = 0.0
+                q_sma200_col = q_sliced.get("sma_200")
+                if q_sma200_col is not None and len(q_sma200_col) >= regime_cfg.sma200_slope_lookback + 1:
+                    q_cur_sma = q_sma200_col.iloc[-1]
+                    q_past_sma = q_sma200_col.iloc[-(regime_cfg.sma200_slope_lookback + 1)]
+                    if not pd.isna(q_cur_sma) and not pd.isna(q_past_sma) and q_past_sma != 0:
+                        q_slope_pct = (q_cur_sma - q_past_sma) / q_past_sma
+                
+                q_atr_pct = q_atr / q_close if (not pd.isna(q_atr) and q_close > 0) else 0.0
+                
+                # Check if QQQ is in RISK_ON
+                q_is_risk_on = (q_close > q_sma50 and q_close > q_sma200) and (q_atr_pct < regime_cfg.atr_vol_threshold) and (q_slope_pct > regime_cfg.sma200_slope_threshold)
+                
+                if not q_is_risk_on:
+                    is_risk_on = False
+            else:
+                is_risk_on = False
+        else:
+            is_risk_on = False
 
-    # Composite
-    composite = sig_structure + sig_slope + sig_vol
-    raw_regime = _composite_to_regime(composite)
+    if is_risk_off:
+        raw_regime = Regime.RISK_OFF
+    elif is_risk_on:
+        raw_regime = Regime.RISK_ON
+    else:
+        raw_regime = Regime.CAUTIOUS
 
     # Apply smoothing if provided
     regime = smoothing.update(raw_regime) if smoothing else raw_regime
 
     # Map to trading parameters
     trading_params = _regime_to_params(regime, params_cfg)
-    confidence = abs(composite) / 3.0  # normalize to 0–1
+    confidence = 1.0  # Simplistic boolean confidence
 
     narrative = (
-        f"Regime {regime.value}: structure={sig_structure:+.0f}, "
-        f"slope={sig_slope:+.0f}, vol={sig_vol:+.0f} "
-        f"(composite={composite:+.1f})"
+        f"Regime {regime.value}: close={close:.1f}, "
+        f"sma50={sma50:.1f}, sma200={sma200:.1f}, "
+        f"atr%={atr_pct:.1%}, sma200_slope={slope_pct:.1%}"
     )
 
     state = MarketState(
         regime=regime,
-        regime_score=composite,
+        regime_score=0.0,
         regime_confidence=min(confidence, 1.0),
         narrative=narrative,
         computed_at=dt.to_pydatetime(),
         source="intelligence.regime_classifier"
     )
     
+    # Enforce Clamps
+    raw_max_pos = trading_params["max_positions"]
+    clamped_max_pos = min(raw_max_pos, params_cfg.risk_on_max_positions)
+    
+    raw_size_mult = trading_params["position_size_multiplier"]
+    clamped_size_mult = max(0.0, min(1.0, raw_size_mult))
+    
+    raw_threshold = trading_params["scorecard_threshold"]
+    clamped_threshold = max(4.0, min(6.0, raw_threshold))
+
     policy = PolicyOverrides(
-        max_positions=trading_params["max_positions"],
-        position_size_multiplier=trading_params["position_size_multiplier"],
-        scorecard_threshold=trading_params["scorecard_threshold"]
+        allow_entries=trading_params["allow_entries"],
+        max_positions=clamped_max_pos,
+        position_size_multiplier=clamped_size_mult,
+        scorecard_threshold=clamped_threshold
     )
 
     return ControlPlan(state=state, policy=policy)

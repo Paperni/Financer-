@@ -29,7 +29,7 @@ def test_golden_replay_deterministic_no_network(tmp_path):
     with patch("financer.cli.run_replay.build_features") as mock_build:
         mock_build.return_value = df_mock
         
-        portfolio, equity_curve, trade_log = run_replay(
+        portfolio, equity_curve, trade_log, *_ = run_replay(
             tickers=["SYNTH"],
             start="2025-01-01",
             end="2025-01-03",
@@ -89,7 +89,7 @@ def test_golden_replay_multiticker_deterministic_hash(tmp_path):
         return dfs[ticker]
         
     with patch("financer.cli.run_replay.build_features", side_effect=mock_build_features):
-        portfolio, eq, trades = run_replay(
+        portfolio, eq, trades, *_ = run_replay(
             tickers=["AAPL", "MSFT", "SPY"],
             start="2025-01-01",
             end="2025-02-28", # Approx 60 days
@@ -121,7 +121,7 @@ def test_veto_unknown_regime():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
 
 
@@ -135,7 +135,7 @@ def test_veto_missing_columns():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
 
 
@@ -149,8 +149,115 @@ def test_veto_earnings_blackout():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-01", min_entry_score=4.0)
     assert len(trades[0]["filled_orders"]) == 0
+
+
+def _make_synth_row(close, rsi=35.0, macd_hist=0.5, rs_20=1.1):
+    """Return a single-row feature dict for synthetic replay."""
+    return {
+        "close": close,
+        "atr_14": 2.0,
+        "sma_50": close - 10,
+        "above_50": True,
+        "regime": "RISK_ON",
+        "rsi_14": rsi,
+        "macd_hist": macd_hist,
+        "rs_20": rs_20,
+        "peg_proxy": 1.0,
+        "earnings_within_7d": False,
+        "roc_20": 0.15,
+    }
+
+
+def test_replay_respects_window_trades_outside_excluded():
+    """BUY trigger exists outside the window; replay must not execute it."""
+    # Day 1 (outside window): strong BUY signal
+    # Day 2-3 (inside window):  no signal (high RSI, negative MACD)
+    dates = pd.date_range("2025-01-01", periods=3, tz=timezone.utc)
+    df = pd.DataFrame({
+        "close":   [100.0, 200.0, 200.0],
+        "atr_14":  [2.0,   2.0,   2.0],
+        "sma_50":  [90.0,  210.0, 210.0],
+        "above_50":[True,  False, False],
+        "regime":  ["RISK_ON", "RISK_ON", "RISK_ON"],
+        "rsi_14":  [35.0,  80.0,  80.0],    # day 1 triggers, days 2-3 don't
+        "macd_hist":[0.5,  -1.0,  -1.0],
+        "rs_20":   [1.1,   0.5,   0.5],
+        "peg_proxy":[1.0,  3.0,   3.0],
+        "earnings_within_7d": [False, False, False],
+        "roc_20":  [0.15,  0.05,  0.05],
+    }, index=dates)
+
+    # Pass precomputed features (spans 3 days) but restrict window to day 2-3
+    precomputed = {"TICK": df}
+    daily = {}
+    for d, row in df.iterrows():
+        daily[d] = {"TICK": row.to_dict()}
+
+    port, eq, trades, *_ = run_replay(
+        tickers=["TICK"],
+        start="2025-01-02",
+        end="2025-01-03",
+        precomputed_features=precomputed,
+        precomputed_daily_features=daily,
+        min_entry_score=4.0,
+    )
+
+    # No trades should be executed — the BUY trigger was on day 1 (outside window)
+    all_filled = []
+    for day in trades:
+        all_filled.extend(day["filled_orders"])
+    assert len(all_filled) == 0
+
+    # Equity curve should only contain dates within the window
+    assert len(eq) == 2
+    for pt in eq:
+        assert pt["date"] >= "2025-01-02"
+        assert pt["date"] <= "2025-01-03"
+
+
+def test_replay_equity_curve_within_bounds():
+    """Equity curve timestamps must fall within [start, end] even with wider precomputed data."""
+    dates = pd.date_range("2025-01-01", periods=10, tz=timezone.utc)
+    df = pd.DataFrame({
+        "close": [100.0 + i for i in range(10)],
+        "atr_14": [2.0] * 10,
+        "sma_50": [90.0] * 10,
+        "above_50": [True] * 10,
+        "regime": ["RISK_ON"] * 10,
+        "rsi_14": [50.0] * 10,
+        "macd_hist": [-0.5] * 10,
+        "rs_20": [0.9] * 10,
+        "peg_proxy": [3.0] * 10,
+        "earnings_within_7d": [False] * 10,
+        "roc_20": [0.15] * 10,
+    }, index=dates)
+
+    precomputed = {"TICK": df}
+    daily = {}
+    for d, row in df.iterrows():
+        daily[d] = {"TICK": row.to_dict()}
+
+    # Request only days 4-7 (2025-01-04 to 2025-01-07)
+    port, eq, trades, *_ = run_replay(
+        tickers=["TICK"],
+        start="2025-01-04",
+        end="2025-01-07",
+        precomputed_features=precomputed,
+        precomputed_daily_features=daily,
+        min_entry_score=4.0,
+    )
+
+    # Only business days within the window should appear
+    for pt in eq:
+        assert pt["date"] >= "2025-01-04", f"Date {pt['date']} before window start"
+        assert pt["date"] <= "2025-01-07", f"Date {pt['date']} after window end"
+
+    # Should have fewer entries than the 10-day input
+    assert len(eq) < 10
+    # Should have at least 1 entry (Jan 6 and 7 are Mon/Tue)
+    assert len(eq) >= 1
 
 
 def test_integrity_no_multiple_buys():
@@ -163,7 +270,7 @@ def test_integrity_no_multiple_buys():
     }, index=dates)
 
     with patch("financer.cli.run_replay.build_features", return_value=df):
-        port, eq, trades = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
+        port, eq, trades, *_ = run_replay(["TICK"], "2025-01-01", "2025-01-02", min_entry_score=4.0)
     
     # Assert Day 1 buys the ticket
     day1 = trades[0]
