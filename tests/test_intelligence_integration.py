@@ -24,7 +24,7 @@ from financer.models.actions import Order
 from financer.models.intents import ReasonCode, TradeIntent
 from financer.models.portfolio import PortfolioSnapshot, PositionState
 from financer.models.risk import RiskState
-from financer.intelligence.models import ControlPlan
+from financer.intelligence.models import ControlPlan, PolicyOverrides
 
 
 def _buy_intent(ticker: str = "AAPL", price: float = 150.0) -> TradeIntent:
@@ -82,7 +82,7 @@ class TestControlPlanSizing:
         qty_base = plan_base.orders[0].qty
 
         # With 50% multiplier
-        cp = ControlPlan(position_size_multiplier=0.50, max_positions=20)
+        cp = ControlPlan(policy=PolicyOverrides(position_size_multiplier=0.50, max_positions=20))
         intent2 = _buy_intent(price=100.0)
         plan_half = orch.formulate_plan([intent2], [], portfolio, risk_state, control_plan=cp)
         qty_half = plan_half.orders[0].qty
@@ -97,7 +97,7 @@ class TestControlPlanSizing:
         portfolio = PortfolioSnapshot(cash=100_000, positions=[])
         risk_state = RiskState(regime=Regime.RISK_ON)
 
-        cp = ControlPlan(position_size_multiplier=0.0, max_positions=0)
+        cp = ControlPlan(policy=PolicyOverrides(position_size_multiplier=0.0, max_positions=0))
         plan = orch.formulate_plan([intent], [], portfolio, risk_state, control_plan=cp)
         # All BUY orders should be skipped (qty=0)
         buy_orders = [o for o in plan.orders if o.direction == Direction.BUY]
@@ -113,7 +113,7 @@ class TestControlPlanSizing:
         plan_base = orch.formulate_plan([intent], [], portfolio, risk_state)
         qty_base = plan_base.orders[0].qty
 
-        cp = ControlPlan(position_size_multiplier=1.0, max_positions=20)
+        cp = ControlPlan(policy=PolicyOverrides(position_size_multiplier=1.0, max_positions=20))
         intent2 = _buy_intent(price=100.0)
         plan_cp = orch.formulate_plan([intent2], [], portfolio, risk_state, control_plan=cp)
         # multiplier=1.0 path: int(qty * 1.0) == qty
@@ -147,7 +147,7 @@ class TestControlPlanMaxPositions:
         assert not veto_no_cp.vetoed
 
         # With control_plan max_positions=2: 3 >= 2, should veto
-        cp = ControlPlan(max_positions=2)
+        cp = ControlPlan(policy=PolicyOverrides(max_positions=2))
         order2 = Order(
             ticker="TSLA", direction=Direction.BUY, qty=10, price=200.0,
             stop_loss=190.0, source_engine=EngineSource.SWING, reason_codes=[],
@@ -170,7 +170,7 @@ class TestControlPlanMaxPositions:
         portfolio = PortfolioSnapshot(cash=80_000, positions=positions)
         state = RiskState(open_risk_pct=0.03)
 
-        cp = ControlPlan(max_positions=5)
+        cp = ControlPlan(policy=PolicyOverrides(max_positions=5))
         order = Order(
             ticker="TSLA", direction=Direction.BUY, qty=10, price=200.0,
             stop_loss=190.0, source_engine=EngineSource.SWING, reason_codes=[],
